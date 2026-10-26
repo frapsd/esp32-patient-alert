@@ -100,11 +100,21 @@ eventualmente segue.
 
 - **Richiesta leggera:** priorità 0, suono di default, testo tipo "Richiesta di
   aiuto (non urgente)".
-- **Emergenza:** priorità 2, `retry` = 30 s, `expire` = il massimo consentito
-  dall'API (da verificare su pushover.net/api; dovrebbe essere 3 ore). Suono
-  di sistema forte; la scelta precisa la fanno i destinatari, che possono
-  personalizzarlo nell'app. Titolo e testo inequivocabili ("EMERGENZA — il
-  paziente ha premuto il bottone").
+- **Emergenza:** priorità 2, `retry` = 30 s (il minimo consentito), `expire`
+  = 1500 s, suono `persistent` (i destinatari possono cambiarlo nell'app).
+  Titolo e testo inequivocabili ("EMERGENZA — il paziente ha premuto il
+  bottone"). Motivo di `expire` = 1500: Pushover limita i retry a 50 qualunque
+  sia `expire` (massimo 10800). Con un `expire` più lungo l'allarme
+  smetterebbe di suonare dopo circa 25 minuti, ma risulterebbe "non scaduto"
+  per ore. Così invece la scadenza coincide con l'ultimo retry e
+  il dispositivo rimanda subito una nuova emergenza, che continua a suonare
+  senza interruzioni. (Verificato su pushover.net/api il 2026-10-26.)
+- **Limiti dell'API rispettati** (pushover.net/api): ricevute interrogate non
+  più spesso di una ogni 5 s; dopo un errore 5xx o di rete, nuovo tentativo
+  non prima di 5 s; le risposte 4xx (compreso il 429 per quota esaurita) non
+  si risolvono riprovando, e molti 4xx in pochi minuti fanno bloccare l'IP,
+  quindi dopo un 4xx si riprova al massimo ogni 5 minuti; al massimo 2
+  connessioni contemporanee.
 - **Presa in carico:** quando la ricevuta indica `acknowledged`, si invia al
   gruppo un messaggio a priorità 0: "<nome dispositivo/utente> ha preso in
   carico l'emergenza". Il nome si ricava da `acknowledged_by_device` o da una
