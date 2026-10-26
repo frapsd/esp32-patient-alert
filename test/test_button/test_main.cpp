@@ -96,6 +96,15 @@ static void test_sparse_updates_long_press_is_hold() {
   append(r, feed(b, false, 2000, 2300));     // no updates 200..2000 while held
   TEST_ASSERT_EQUAL(1, r.size());
   TEST_ASSERT_TRUE(r[0].g == Gesture::Hold);
+
+  // debounce 0: release is accepted on the first released sample, so the
+  // hold check never gets a chance to run first.
+  ButtonInterpreter z(0, 1500);
+  feed(z, false, 0, 100);
+  auto q = feed(z, true, 100, 200);
+  append(q, feed(z, false, 2000, 2300));
+  TEST_ASSERT_EQUAL(1, q.size());
+  TEST_ASSERT_TRUE(q[0].g == Gesture::Hold);
 }
 
 int main(int, char**) {
