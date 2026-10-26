@@ -5,6 +5,11 @@
 > **Senza internet di casa (o senza corrente) l'allarme NON parte.** Il dispositivo non
 > avvisa nessuno se è spento o scollegato dalla rete.
 
+> **Stato della v1:** la logica è verificata con i test automatici e il firmware si avvia
+> sulla scheda, ma il percorso reale in rete (Wi-Fi → Pushover → telefono) **non è ancora
+> stato provato da capo a fondo**. Prima di farci affidamento, eseguire con i segreti veri i
+> test 1–4, 8 e 10 di [docs/manual-tests.md](docs/manual-tests.md).
+
 ## Cosa fa
 
 Un ESP32 con un bottone e un LED. Il paziente preme il bottone e sui telefoni di chi lo
@@ -17,7 +22,11 @@ assiste (familiari, badanti) arriva una notifica Pushover:
 Quando qualcuno conferma, il LED diventa fisso ("aiuto in arrivo") e gli altri ricevono il
 messaggio "<nome> ha preso in carico l'emergenza". Se nessuno conferma entro 1500 s (25 minuti),
 il dispositivo rimanda subito una nuova emergenza, senza interruzioni. Se il dispositivo si
-riavvia durante un'emergenza, la riprende da dove era.
+riavvia durante un'emergenza, la riprende da dove era: l'emergenza viene salvata in memoria
+prima di essere inviata. Se si riavvia (ad esempio per un calo di corrente) durante i 10
+minuti "confermata", il LED torna fisso e una pressione vale ancora come nuova emergenza;
+appena l'ora è sincronizzata, il LED resta fisso solo per il tempo che mancava davvero, o
+torna a riposo se i 10 minuti erano già finiti.
 
 Principio: nel dubbio, emergenza.
 
@@ -110,13 +119,18 @@ pio device monitor      # log seriali a 115200
 La porta seriale è impostata in `platformio.ini` (`/dev/cu.usbserial-0001`); cambiarla se la
 scheda compare con un altro nome. I log non stampano token né chiavi.
 
-### Ripristinare il firmware originale della scheda
+### Backup e ripristino del firmware originale della scheda
 
-Esiste un backup completo della flash originale (`~/esp32-backup.bin`). Per
-rimetterlo:
+Prima di caricare il firmware la prima volta, fare un backup completo della flash (4 MB):
 
 ```
-esptool --port <porta> write-flash 0 ~/esp32-backup.bin
+esptool --port <porta> read-flash 0 0x400000 esp32-backup.bin
+```
+
+Per ripristinare il firmware originale:
+
+```
+esptool --port <porta> write-flash 0 esp32-backup.bin
 ```
 
 ## Sicurezza
@@ -134,7 +148,8 @@ esptool --port <porta> write-flash 0 ~/esp32-backup.bin
 - L'ora serve per la verifica TLS: viene presa via NTP (`pool.ntp.org`, `time.google.com`) e
   finché non è valida il dispositivo si considera offline.
 - Se il Wi-Fi resta giù per 60 s, il dispositivo riavvia la connessione Wi-Fi. Se il firmware
-  si blocca, un watchdog (60 s) riavvia la scheda.
+  si blocca (il ciclo principale o il task del bottone/LED), un watchdog (60 s) riavvia la
+  scheda; lo stato dell'allarme riparte dalla memoria.
 
 ## Spostare il bottone sul pin definitivo
 
@@ -143,14 +158,39 @@ propria scheda). Per l'hardware finale modificare **solo** `include/config.h`
 (`PIN_BUTTON`, `BUTTON_ACTIVE_LOW`, `PIN_LED`, `LED_ACTIVE_HIGH`).
 
 Il bottone definitivo **non deve stare su GPIO0**: quel pin decide la modalità di avvio, e se è
-premuto all'accensione la scheda non parte normalmente. Usare un altro GPIO libero con pull-up
-interno (il firmware lo attiva: `INPUT_PULLUP`), con il bottone collegato tra il pin e GND.
+premuto all'accensione la scheda non parte normalmente.
 
-## Limiti e prossimi passi
+**Pin sicuri per il bottone:** GPIO25, GPIO26, GPIO27, GPIO32, GPIO33. Il firmware attiva il
+pull-up interno (`INPUT_PULLUP`); collegare il bottone tra il pin e GND e lasciare
+`BUTTON_ACTIVE_LOW true`.
+
+**Pin da evitare** (per il bottone e per il LED):
+
+| Pin | Perché |
+|---|---|
+| GPIO0, GPIO2, GPIO5, GPIO12, GPIO15 | Pin di "strapping": il loro livello all'accensione decide come parte la scheda. GPIO12 alto all'avvio impedisce l'avvio; GPIO2 qui è il LED di bordo. |
+| GPIO6–GPIO11 | Collegati alla memoria flash interna: usarli blocca la scheda. |
+| GPIO34–GPIO39 | Solo ingresso e **senza pull-up interno**: il pin resterebbe "flottante" e genererebbe pressioni fantasma. Inutilizzabili anche per il LED. |
+
+Per un LED esterno usare uno dei pin sicuri sopra (ad esempio GPIO26 o GPIO27, con una
+resistenza da 220–330 Ω in serie verso GND e `LED_ACTIVE_HIGH true`), mai uno dei pin da
+evitare.
+
+## Limiti
 
 - Senza internet o senza corrente l'allarme non parte, e nessuno è avvisato che il dispositivo
   è fuori uso. Alimentazione solo USB, nessuna batteria tampone.
-- Passo successivo consigliato: heartbeat verso healthchecks.io con avviso Pushover se il
-  dispositivo smette di farsi sentire.
-- Altri miglioramenti: escalation con telefonata (modulo SIM), UPS/batteria tampone.
 - Solo Android testato/previsto; niente annullamento di un falso allarme dal bottone.
+
+## Prossimi passi
+
+- Heartbeat verso healthchecks.io con avviso Pushover se il dispositivo smette di farsi
+  sentire (oggi un dispositivo spento o offline non avvisa nessuno).
+- Segnalare l'errore di configurazione anche durante un'emergenza: oggi il lampeggio veloce
+  dell'emergenza ha la precedenza, quindi il paziente non vede che gli avvisi non escono.
+- LED immediato alla pressione lunga anche mentre è in corso un'altra richiesta di rete (oggi
+  il lampeggio veloce parte quando il ciclo principale elabora il gesto, fino a qualche
+  decina di secondi dopo).
+- Un segnale del LED per una richiesta leggera in coda (non ancora inviata).
+- Escalation con telefonata (modulo SIM).
+- UPS/batteria tampone.

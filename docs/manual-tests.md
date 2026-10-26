@@ -52,13 +52,15 @@ Prima di iniziare: LED a riposo = un lampo brevissimo ogni 5 s (Wi-Fi e ora ok).
   - LED: dopo il riavvio, lampeggio veloce subito.
   - Telefoni: se la ricevuta era già salvata il dispositivo riprende ad interrogarla senza
     reinviare; se non c'era, rimanda l'emergenza. Confermare: LED fisso.
-  - Variante: riavviare a LED fisso ("confermata", entro i 10 minuti). Comportamento atteso, non
-    un difetto: il riavvio legge lo stato salvato una sola volta, prima che Wi-Fi e ora (NTP)
-    siano pronti. Dopo un'interruzione di corrente l'ora non è nota, quindi lo stato "confermata"
-    normalmente NON viene ripristinato: il LED torna a riposo (o offline finché manca la rete) e
-    non parte nessun nuovo allarme, perché la conferma era già avvenuta. Dopo un reset software
-    (per esempio il watchdog) l'ESP32 potrebbe mantenere l'orologio e il LED fisso riprendere per
-    il tempo che resta: dipende dall'hardware e non è stato verificato.
+  - Variante A: riavviare a LED fisso ("confermata", entro i 10 minuti), togliendo e ridando
+    corrente. LED: dopo il riavvio torna **fisso** subito, anche prima che Wi-Fi e ora siano
+    pronti; nel log `[alert] restored mode=Confirmed`. Una pressione breve in questo momento
+    deve far partire una **nuova emergenza** (lampeggio veloce), non una richiesta leggera.
+  - Variante B: come la A senza premere. Appena l'ora è sincronizzata (log `[net] wall time
+    valid`) il LED resta fisso solo per il tempo che mancava ai 10 minuti dalla conferma
+    originale, poi torna a riposo (log `mode Confirmed -> Idle`).
+  - Variante C: confermare, togliere corrente e ridarla dopo più di 10 minuti. LED: fisso al
+    riavvio, poi a riposo appena l'ora è sincronizzata; nessun nuovo allarme.
 - [ ] **9. Scadenza senza conferma**
   - Solo in una build di prova, mai nel firmware vero: in
     `lib/alert_core/src/pushover_protocol.cpp`, nella funzione `emergencyBody`, abbassare
