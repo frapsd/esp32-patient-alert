@@ -87,7 +87,7 @@ dalla durata.
      (il suono inviato è `persistent`, ogni utente può cambiarlo nell'app);
    - nelle impostazioni Android, **disattivare l'ottimizzazione della batteria** per Pushover
      e lasciare le notifiche attive.
-6. Limite: 10.000 messaggi al mese per applicazione. Un messaggio a un gruppo conta una volta
+6. Limite: 10.000 messaggi gratuiti al mese per account Pushover (condivisi da tutte le sue applicazioni). Un messaggio a un gruppo conta una volta
    per ogni membro del gruppo.
 7. Provare tutto con la checklist in [docs/manual-tests.md](docs/manual-tests.md).
 

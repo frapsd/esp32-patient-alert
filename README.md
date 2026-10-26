@@ -101,7 +101,7 @@ Out of the box the button is the board's BOOT key (GPIO0) and the LED is the on-
 3. On the website, **Create an Application/API Token**: this is `PUSHOVER_APP_TOKEN`.
 4. **Create a Delivery Group** and add the caregivers: the group key is `PUSHOVER_GROUP_KEY`.
 5. On each phone, so emergencies can actually sound: allow Do Not Disturb override for emergency-priority notifications in the Pushover app, set an alarm-style sound/channel (the firmware sends the `persistent` sound; users can change it in the app), and disable battery optimization for Pushover.
-6. Limit: 10,000 messages per month per application. A message to a group counts once per group member.
+6. Limit: 10,000 free messages per month per Pushover account (shared by all its applications). A message to a group counts once per group member.
 
 ### 2. Configure secrets
 
