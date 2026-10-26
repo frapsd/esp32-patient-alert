@@ -89,6 +89,15 @@ static void test_two_taps_two_gestures() {
   TEST_ASSERT_TRUE(r[1].g == Gesture::Tap);
 }
 
+static void test_sparse_updates_long_press_is_hold() {
+  ButtonInterpreter b(30, 1500);
+  feed(b, false, 0, 100);
+  auto r = feed(b, true, 100, 200);          // accepted at 130
+  append(r, feed(b, false, 2000, 2300));     // no updates 200..2000 while held
+  TEST_ASSERT_EQUAL(1, r.size());
+  TEST_ASSERT_TRUE(r[0].g == Gesture::Hold);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_tap_emits_on_release);
@@ -98,5 +107,6 @@ int main(int, char**) {
   RUN_TEST(test_bouncy_press_counts_once);
   RUN_TEST(test_wraparound_tap);
   RUN_TEST(test_two_taps_two_gestures);
+  RUN_TEST(test_sparse_updates_long_press_is_hold);
   return UNITY_END();
 }

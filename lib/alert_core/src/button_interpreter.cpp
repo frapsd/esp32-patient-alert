@@ -11,7 +11,10 @@ std::optional<Gesture> ButtonInterpreter::update(bool pressed, uint32_t nowMs) {
       acceptedPressMs_ = nowMs;
       holdFired_ = false;
     } else if (!holdFired_) {
-      return Gesture::Tap;
+      // Sparse updates: a press that outlasted holdMs is a Hold even if the
+      // threshold was never observed while still pressed.
+      return static_cast<uint32_t>(nowMs - acceptedPressMs_) >= holdMs_ ? Gesture::Hold
+                                                                         : Gesture::Tap;
     }
     return std::nullopt;
   }
