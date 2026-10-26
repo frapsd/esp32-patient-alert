@@ -4,6 +4,7 @@
 #include "button_interpreter.h"
 #include "config.h"
 #include "led_pattern.h"
+#include "net.h"
 
 namespace {
 constexpr uint32_t kIoPeriodMs = 10;
@@ -22,7 +23,8 @@ void ioTask(void*) {
     bool level = digitalRead(PIN_BUTTON) == HIGH;
     bool pressed = BUTTON_ACTIVE_LOW ? !level : level;
     if (std::optional<Gesture> g = button.update(pressed, now)) {
-      Gesture item = *g;
+      // netWallEpoch() only reads time(); safe from this core.
+      GestureEvent item{*g, now, netWallEpoch()};
       if (xQueueSend(gQueue, &item, 0) != pdTRUE) {
         Serial.println("[io] gesture queue full, gesture dropped");
       }

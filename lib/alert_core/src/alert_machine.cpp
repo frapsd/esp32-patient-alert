@@ -108,28 +108,48 @@ void AlertMachine::restore(const PersistedState& s, uint32_t nowMs, uint32_t now
   commit(s);
 }
 
-void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t nowEpoch) {
+void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t pressMs, uint32_t pressEpoch) {
   PersistedState before = persisted();
+
+  // Ages relative to nowMs keep the comparisons wraparound-safe. A press stamped
+  // "after" nowMs cannot happen by construction; treat it as pressed now so a
+  // wrapped difference never looks like an old press inside a window.
+  if ((int32_t)(nowMs - pressMs) < 0) pressMs = nowMs;
+  const uint32_t pressAge = nowMs - pressMs;
+
+  // Decide against the state as it was at the press, before expiring it at nowMs.
+  bool pressedWhileConfirmed = false;
+  bool pressedBeforeConfirm = false;  // the emergency was still unacknowledged then
+  if (mode_ == Mode::Confirmed) {
+    const uint32_t confirmedAge = nowMs - confirmedAtMs_;
+    if (pressAge > confirmedAge) {
+      pressedBeforeConfirm = true;
+    } else {
+      pressedWhileConfirmed = confirmedAge - pressAge < cfg_.confirmedWindowS * 1000u;
+    }
+  }
+  bool upgrade = false;
+  if (hasLastLightPress_) {
+    const uint32_t lightAge = nowMs - lastLightPressMs_;
+    upgrade = pressAge <= lightAge && lightAge - pressAge < cfg_.lightUpgradeWindowMs;
+  }
+
   expireTimedState(nowMs);
-  switch (mode_) {
-    case Mode::EmergencyPending:
-    case Mode::EmergencyAwaitingAck:
-      break;  // already raising an emergency
-    case Mode::Confirmed:
-      triggerEmergency(nowMs);
-      break;
-    case Mode::Idle:
-      if (g == Gesture::Hold || hasLastLightPress_) {
-        triggerEmergency(nowMs);
-        break;
-      }
-      if (lightCount_ < kLightQueueCap) {
-        if (lightCount_ == 0) lightTimer_.set(nowMs, 0);
-        lightQueue_[lightCount_++] = nowEpoch;
-      }
-      hasLastLightPress_ = true;  // also when dropped: a second press is still an upgrade
-      lastLightPressMs_ = nowMs;
-      break;
+  if (mode_ == Mode::EmergencyPending || mode_ == Mode::EmergencyAwaitingAck) {
+    // already raising an emergency
+  } else if (pressedWhileConfirmed) {
+    triggerEmergency(nowMs);
+  } else if (pressedBeforeConfirm) {
+    // pressed while the emergency was unacknowledged: ignored
+  } else if (g == Gesture::Hold || upgrade) {
+    triggerEmergency(nowMs);
+  } else {
+    if (lightCount_ < kLightQueueCap) {
+      if (lightCount_ == 0) lightTimer_.set(nowMs, 0);
+      lightQueue_[lightCount_++] = pressEpoch;
+    }
+    hasLastLightPress_ = true;  // also when dropped: a second press is still an upgrade
+    lastLightPressMs_ = pressMs;
   }
   commit(before);
 }

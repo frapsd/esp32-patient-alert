@@ -27,7 +27,11 @@ class AlertMachine {
  public:
   explicit AlertMachine(const MachineConfig&);
   void restore(const PersistedState&, uint32_t nowMs, uint32_t nowEpoch);
-  void onGesture(Gesture, uint32_t nowMs, uint32_t nowEpoch);
+  // pressMs/pressEpoch: when the button was pressed (stamped by the button
+  // task); nowMs: when the gesture is processed (may be later if the caller
+  // was busy). Window decisions use the press time, timers use nowMs.
+  // pressEpoch 0 = wall time unknown at the press.
+  void onGesture(Gesture, uint32_t nowMs, uint32_t pressMs, uint32_t pressEpoch);
   Command nextCommand(uint32_t nowMs);     // None if nothing is due yet
   void onEmergencySent(const SendResponse&, uint32_t nowMs);
   void onReceipt(const ReceiptStatus&, uint32_t nowMs, uint32_t nowEpoch);

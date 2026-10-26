@@ -21,6 +21,7 @@ AlertMachine machine(MachineConfig{kLightUpgradeWindowMs, kConfirmedWindowS, kPo
 QueueHandle_t gestureQueue = nullptr;
 Mode lastMode = Mode::Idle;
 LedPattern lastLed = LedPattern::Offline;
+bool saveFailing = false;  // last nvsSave failed: retry every iteration
 
 const char* modeName(Mode m) {
   switch (m) {
@@ -116,7 +117,7 @@ void setup() {
   lastMode = machine.mode();
   Serial.printf("[alert] restored mode=%s\n", modeName(lastMode));
 
-  gestureQueue = xQueueCreate(kGestureQueueLen, sizeof(Gesture));
+  gestureQueue = xQueueCreate(kGestureQueueLen, sizeof(GestureEvent));
   ioSetPattern(lastLed);
   ioStart(gestureQueue);
   netBegin();
@@ -129,10 +130,12 @@ void setup() {
 void loop() {
   esp_task_wdt_reset();
 
-  Gesture g;
-  while (xQueueReceive(gestureQueue, &g, 0) == pdTRUE) {
-    Serial.printf("[alert] gesture %s\n", g == Gesture::Hold ? "Hold" : "Tap");
-    machine.onGesture(g, millis(), netWallEpoch());
+  GestureEvent ev;
+  while (xQueueReceive(gestureQueue, &ev, 0) == pdTRUE) {
+    uint32_t now = millis();
+    Serial.printf("[alert] gesture %s (pressed %ums ago)\n", ev.g == Gesture::Hold ? "Hold" : "Tap",
+                  (unsigned)(now - ev.pressMs));
+    machine.onGesture(ev.g, now, ev.pressMs, ev.pressEpoch);
     logModeChange();
   }
 
@@ -148,7 +151,14 @@ void loop() {
     logModeChange();
   }
 
-  if (machine.takeDirty()) nvsSave(machine.persisted());
+  // takeDirty() clears the flag, so a failed save is retried from saveFailing
+  // until it succeeds (a lost EmergencyPending would come back Idle on reboot).
+  if (machine.takeDirty() || saveFailing) {
+    bool ok = nvsSave(machine.persisted());
+    if (!ok && !saveFailing) Serial.println("[nvs] state save failed, retrying");
+    if (ok && saveFailing) Serial.println("[nvs] state save recovered");
+    saveFailing = !ok;
+  }
 
   LedPattern led = machine.led(millis(), netOnline());
   if (led != lastLed) {

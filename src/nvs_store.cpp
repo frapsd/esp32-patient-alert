@@ -24,15 +24,14 @@ bool nvsLoad(PersistedState& out) {
   return true;
 }
 
-void nvsSave(const PersistedState& s) {
+bool nvsSave(const PersistedState& s) {
   uint8_t blob[kPersistedBlobLen];
   encodeState(s, blob);
   Preferences prefs;
   if (!prefs.begin(kNamespace, false)) {
-    Serial.println("[nvs] open for write failed");
-    return;
+    return false;
   }
   size_t written = prefs.putBytes(kKey, blob, sizeof(blob));
   prefs.end();
-  if (written != sizeof(blob)) Serial.println("[nvs] write failed");
+  return written == kPersistedBlobLen;
 }

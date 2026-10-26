@@ -40,7 +40,7 @@ static ReceiptStatus receiptResult(HttpOutcome o, bool acked, bool expired, cons
 
 // Hold at t, send Ok with receipt r: machine is EmergencyAwaitingAck, poll due at t + 10 000.
 static void toAwaitingAck(AlertMachine& m, uint32_t t, const char* r) {
-  m.onGesture(Gesture::Hold, t, kEpoch);
+  m.onGesture(Gesture::Hold, t, t, kEpoch);
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, t));
   m.onEmergencySent(sendResult(HttpOutcome::Ok, r), t);
   ASSERT_MODE(Mode::EmergencyAwaitingAck, m.mode());
@@ -59,7 +59,7 @@ static uint32_t toConfirmed(AlertMachine& m, uint32_t t, const char* device) {
 
 static void test_tap_queues_light_request() {
   AlertMachine m(kCfg);
-  m.onGesture(Gesture::Tap, 1000, kEpoch);
+  m.onGesture(Gesture::Tap, 1000, 1000, kEpoch);
   Command c = m.nextCommand(1000);
   ASSERT_KIND(CommandKind::SendLight, c.kind);
   TEST_ASSERT_EQUAL_UINT32(kEpoch, c.pressEpoch);
@@ -74,7 +74,7 @@ static void test_tap_queues_light_request() {
 
 static void test_hold_triggers_emergency() {
   AlertMachine m(kCfg);
-  m.onGesture(Gesture::Hold, 0, kEpoch);
+  m.onGesture(Gesture::Hold, 0, 0, kEpoch);
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, 0));
   ASSERT_MODE(Mode::EmergencyPending, m.mode());
   TEST_ASSERT_TRUE(m.takeDirty());
@@ -85,8 +85,8 @@ static void test_hold_triggers_emergency() {
 static void test_second_tap_within_60s_upgrades() {
   // First light request still unsent: the upgrade drops it.
   AlertMachine m(kCfg);
-  m.onGesture(Gesture::Tap, 0, kEpoch);
-  m.onGesture(Gesture::Tap, 59999, kEpoch + 59);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  m.onGesture(Gesture::Tap, 59999, 59999, kEpoch + 59);
   ASSERT_MODE(Mode::EmergencyPending, m.mode());
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, 59999));
   m.onEmergencySent(sendResult(HttpOutcome::Ok, "r1"), 59999);
@@ -96,21 +96,21 @@ static void test_second_tap_within_60s_upgrades() {
 
   // First light request already delivered: the second press still upgrades.
   AlertMachine m2(kCfg);
-  m2.onGesture(Gesture::Tap, 0, kEpoch);
+  m2.onGesture(Gesture::Tap, 0, 0, kEpoch);
   ASSERT_KIND(CommandKind::SendLight, drain(m2, 0));
   m2.onLightSent(HttpOutcome::Ok, 800);
-  m2.onGesture(Gesture::Tap, 59999, kEpoch + 59);
+  m2.onGesture(Gesture::Tap, 59999, 59999, kEpoch + 59);
   ASSERT_KIND(CommandKind::SendEmergency, drain(m2, 59999));
 }
 
 static void test_second_tap_after_60s_is_light() {
   AlertMachine m(kCfg);
-  m.onGesture(Gesture::Tap, 0, kEpoch);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
   Command c = m.nextCommand(0);
   ASSERT_KIND(CommandKind::SendLight, c.kind);
   TEST_ASSERT_EQUAL_UINT32(kEpoch, c.pressEpoch);
   m.onLightSent(HttpOutcome::Ok, 500);
-  m.onGesture(Gesture::Tap, 60000, kEpoch + 60);
+  m.onGesture(Gesture::Tap, 60000, 60000, kEpoch + 60);
   ASSERT_MODE(Mode::Idle, m.mode());
   c = m.nextCommand(60000);
   ASSERT_KIND(CommandKind::SendLight, c.kind);
@@ -122,18 +122,18 @@ static void test_second_tap_after_60s_is_light() {
 
 static void test_mashing_produces_single_emergency() {
   AlertMachine m(kCfg);
-  m.onGesture(Gesture::Tap, 0, kEpoch);
-  m.onGesture(Gesture::Tap, 500, kEpoch);   // upgrade -> emergency
-  m.onGesture(Gesture::Tap, 1000, kEpoch);  // ignored
-  m.onGesture(Gesture::Hold, 1800, kEpoch); // ignored
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  m.onGesture(Gesture::Tap, 500, 500, kEpoch);   // upgrade -> emergency
+  m.onGesture(Gesture::Tap, 1000, 1000, kEpoch);  // ignored
+  m.onGesture(Gesture::Hold, 1800, 1800, kEpoch); // ignored
   TEST_ASSERT_TRUE(m.takeDirty());
   TEST_ASSERT_FALSE(m.takeDirty());
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, 2000));
   m.onEmergencySent(sendResult(HttpOutcome::Transient, ""), 2000);
 
   // Gestures while pending neither re-trigger nor pull the retry forward.
-  m.onGesture(Gesture::Tap, 2500, kEpoch);
-  m.onGesture(Gesture::Hold, 3000, kEpoch);
+  m.onGesture(Gesture::Tap, 2500, 2500, kEpoch);
+  m.onGesture(Gesture::Hold, 3000, 3000, kEpoch);
   TEST_ASSERT_FALSE(m.takeDirty());
   ASSERT_KIND(CommandKind::None, drain(m, 6999));
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, 7000));
@@ -141,7 +141,7 @@ static void test_mashing_produces_single_emergency() {
   TEST_ASSERT_TRUE(m.takeDirty());
 
   // Nothing else ever queued: no second emergency, no light request.
-  m.onGesture(Gesture::Tap, 7100, kEpoch);
+  m.onGesture(Gesture::Tap, 7100, 7100, kEpoch);
   for (uint32_t t = 7000; t < 17000; t += 250) ASSERT_KIND(CommandKind::None, drain(m, t));
   ASSERT_KIND(CommandKind::PollReceipt, drain(m, 17000));
 }
@@ -186,7 +186,7 @@ static void test_press_during_confirmed_is_emergency() {
   uint32_t t = toConfirmed(m, 0, "pixel-marco");
   ASSERT_KIND(CommandKind::SendAckNotice, drain(m, t));
   m.onAckNoticeSent(HttpOutcome::Ok, t);
-  m.onGesture(Gesture::Tap, t + 20000, kEpoch + 30);
+  m.onGesture(Gesture::Tap, t + 20000, t + 20000, kEpoch + 30);
   ASSERT_MODE(Mode::EmergencyPending, m.mode());
   TEST_ASSERT_TRUE(m.takeDirty());
   TEST_ASSERT_EQUAL_STRING("", m.persisted().receipt);
@@ -198,9 +198,9 @@ static void test_press_during_awaiting_ack_ignored() {
   AlertMachine m(kCfg);
   toAwaitingAck(m, 0, "r1");
   m.takeDirty();
-  m.onGesture(Gesture::Tap, 3000, kEpoch);
-  m.onGesture(Gesture::Hold, 4000, kEpoch);
-  m.onGesture(Gesture::Tap, 5000, kEpoch);
+  m.onGesture(Gesture::Tap, 3000, 3000, kEpoch);
+  m.onGesture(Gesture::Hold, 4000, 4000, kEpoch);
+  m.onGesture(Gesture::Tap, 5000, 5000, kEpoch);
   ASSERT_MODE(Mode::EmergencyAwaitingAck, m.mode());
   TEST_ASSERT_FALSE(m.takeDirty());
   TEST_ASSERT_EQUAL_STRING("r1", m.persisted().receipt);
@@ -210,7 +210,7 @@ static void test_press_during_awaiting_ack_ignored() {
 
 static void test_emergency_survives_repeated_transient_failures() {
   AlertMachine m(kCfg);
-  m.onGesture(Gesture::Hold, 0, kEpoch);
+  m.onGesture(Gesture::Hold, 0, 0, kEpoch);
   uint32_t t = 0;
   for (int i = 0; i < 5; i++) {
     ASSERT_KIND(CommandKind::SendEmergency, drain(m, t));
@@ -236,7 +236,7 @@ static void test_emergency_survives_repeated_transient_failures() {
 
 static void test_rejected_send_waits_300s_and_shows_config_error() {
   AlertMachine m(kCfg);
-  m.onGesture(Gesture::Hold, 0, kEpoch);
+  m.onGesture(Gesture::Hold, 0, 0, kEpoch);
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, 0));
   m.onEmergencySent(sendResult(HttpOutcome::Rejected, ""), 0);
   ASSERT_MODE(Mode::EmergencyPending, m.mode());
@@ -261,7 +261,7 @@ static void test_rejected_send_waits_300s_and_shows_config_error() {
 
   // A rejected light request in Idle shows ConfigError (over Offline too).
   const uint32_t t = 1220000;
-  m.onGesture(Gesture::Tap, t, kEpoch);
+  m.onGesture(Gesture::Tap, t, t, kEpoch);
   ASSERT_KIND(CommandKind::SendLight, drain(m, t));
   m.onLightSent(HttpOutcome::Rejected, t);
   ASSERT_LED(LedPattern::ConfigError, m.led(t, true));
@@ -373,11 +373,11 @@ static void test_restore_confirmed_within_window_keeps_solid_led_for_remaining_t
   AlertMachine w(kCfg);
   w.restore(s, 100, kEpoch + 100);
   ASSERT_MODE(Mode::Confirmed, w.mode());
-  w.onGesture(Gesture::Tap, 499999 + 100, kEpoch + 599);
+  w.onGesture(Gesture::Tap, 499999 + 100, 499999 + 100, kEpoch + 599);
   ASSERT_MODE(Mode::EmergencyPending, w.mode());  // still confirmed -> new emergency
   AlertMachine w2(kCfg);
   w2.restore(s, 100, kEpoch + 100);
-  w2.onGesture(Gesture::Tap, 500000 + 100, kEpoch + 600);
+  w2.onGesture(Gesture::Tap, 500000 + 100, 500000 + 100, kEpoch + 600);
   ASSERT_MODE(Mode::Idle, w2.mode());  // window over -> plain light request
   ASSERT_KIND(CommandKind::SendLight, drain(w2, 500100));
 }
@@ -412,7 +412,7 @@ static void test_light_queue_capacity_4() {
   uint32_t t = 0;
   for (uint32_t i = 0; i < 6; i++) {
     t = i * 60000;
-    m.onGesture(Gesture::Tap, t, kEpoch + i);
+    m.onGesture(Gesture::Tap, t, t, kEpoch + i);
     ASSERT_MODE(Mode::Idle, m.mode());
     Command c = m.nextCommand(t);
     ASSERT_KIND(CommandKind::SendLight, c.kind);
@@ -434,10 +434,10 @@ static void test_light_queue_capacity_4() {
 static void test_emergency_has_priority_over_pending_light_and_ack_notice() {
   // Pending light (backing off) is dropped by the emergency.
   AlertMachine a(kCfg);
-  a.onGesture(Gesture::Tap, 0, kEpoch);
+  a.onGesture(Gesture::Tap, 0, 0, kEpoch);
   ASSERT_KIND(CommandKind::SendLight, drain(a, 0));
   a.onLightSent(HttpOutcome::Transient, 0);
-  a.onGesture(Gesture::Hold, 1000, kEpoch);
+  a.onGesture(Gesture::Hold, 1000, 1000, kEpoch);
   ASSERT_KIND(CommandKind::SendEmergency, drain(a, 6000));
   a.onEmergencySent(sendResult(HttpOutcome::Ok, "r1"), 6000);
   ASSERT_KIND(CommandKind::None, drain(a, 15999));
@@ -445,7 +445,7 @@ static void test_emergency_has_priority_over_pending_light_and_ack_notice() {
   // Unsent ack notice waits behind a new emergency, and is kept.
   AlertMachine b(kCfg);
   uint32_t t = toConfirmed(b, 0, "pixel-marco");
-  b.onGesture(Gesture::Tap, t + 1000, kEpoch);
+  b.onGesture(Gesture::Tap, t + 1000, t + 1000, kEpoch);
   ASSERT_KIND(CommandKind::SendEmergency, drain(b, t + 1000));
   b.onEmergencySent(sendResult(HttpOutcome::Ok, "r2"), t + 1000);
   Command c = b.nextCommand(t + 1000);
@@ -462,7 +462,7 @@ static void test_emergency_has_priority_over_pending_light_and_ack_notice() {
   t = toConfirmed(d, 0, "");
   ASSERT_KIND(CommandKind::SendAckNotice, drain(d, t));
   d.onAckNoticeSent(HttpOutcome::Transient, t);
-  d.onGesture(Gesture::Tap, t + 600000, kEpoch);  // window over -> light request
+  d.onGesture(Gesture::Tap, t + 600000, t + 600000, kEpoch);  // window over -> light request
   ASSERT_MODE(Mode::Idle, d.mode());
   c = d.nextCommand(t + 600000);
   ASSERT_KIND(CommandKind::SendAckNotice, c.kind);
@@ -474,11 +474,55 @@ static void test_emergency_has_priority_over_pending_light_and_ack_notice() {
 static void test_wraparound_retry_timing() {
   AlertMachine m(kCfg);
   const uint32_t t = 0xFFFFF000u;  // 4096 ms before millis wraps
-  m.onGesture(Gesture::Hold, t, kEpoch);
+  m.onGesture(Gesture::Hold, t, t, kEpoch);
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, t));
   m.onEmergencySent(sendResult(HttpOutcome::Transient, ""), t);
   ASSERT_KIND(CommandKind::None, drain(m, t + 4999));  // wrapped, not yet due
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, t + 5000));
+}
+
+// The loop drains gestures late while it is blocked in HTTPS: decisions use the
+// press time, not the drain time.
+static void test_late_drained_second_tap_still_upgrades() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  m.onGesture(Gesture::Tap, 80000, 50000, kEpoch + 50);  // pressed at 50 s, drained at 80 s
+  ASSERT_MODE(Mode::EmergencyPending, m.mode());
+  ASSERT_KIND(CommandKind::SendEmergency, drain(m, 80000));
+
+  // A light request records its press epoch, not the drain-time wall clock.
+  AlertMachine l(kCfg);
+  l.onGesture(Gesture::Tap, 30000, 1000, kEpoch + 1);
+  Command c = l.nextCommand(30000);
+  ASSERT_KIND(CommandKind::SendLight, c.kind);
+  TEST_ASSERT_EQUAL_UINT32(kEpoch + 1, c.pressEpoch);
+
+  // Pressed 60 s after the light press (drained later): plain light request.
+  AlertMachine n(kCfg);
+  n.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  n.onGesture(Gesture::Tap, 90000, 60000, kEpoch + 60);
+  ASSERT_MODE(Mode::Idle, n.mode());
+}
+
+static void test_press_inside_confirmed_window_drained_after_expiry_is_emergency() {
+  AlertMachine m(kCfg);
+  uint32_t t = toConfirmed(m, 0, "phone");
+  m.onGesture(Gesture::Tap, t + 620000, t + 599000, kEpoch + 609);
+  ASSERT_MODE(Mode::EmergencyPending, m.mode());
+  ASSERT_KIND(CommandKind::SendEmergency, drain(m, t + 620000));
+
+  // Pressed just after the window closed, drained later: light request.
+  AlertMachine n(kCfg);
+  t = toConfirmed(n, 0, "phone");
+  n.onGesture(Gesture::Tap, t + 620000, t + 600000, kEpoch + 610);
+  ASSERT_MODE(Mode::Idle, n.mode());
+
+  // A press stamped "after" now (clock wrap) counts as pressed now: it must not
+  // look like it fell inside an expired window.
+  AlertMachine w(kCfg);
+  t = toConfirmed(w, 0, "phone");
+  w.onGesture(Gesture::Tap, t + 620000, t + 620001, kEpoch + 610);
+  ASSERT_MODE(Mode::Idle, w.mode());
 }
 
 int main(int, char**) {
@@ -504,5 +548,7 @@ int main(int, char**) {
   RUN_TEST(test_light_queue_capacity_4);
   RUN_TEST(test_emergency_has_priority_over_pending_light_and_ack_notice);
   RUN_TEST(test_wraparound_retry_timing);
+  RUN_TEST(test_late_drained_second_tap_still_upgrades);
+  RUN_TEST(test_press_inside_confirmed_window_drained_after_expiry_is_emergency);
   return UNITY_END();
 }
