@@ -1,196 +1,165 @@
-# ESP Alert — bottone di chiamata per paziente allettato
+# ESP32 Patient Alert
 
-> **ATTENZIONE: questo NON è un dispositivo medico certificato e NON sostituisce il 112.**
-> **Se la situazione è grave, chiamare subito il 112.**
-> **Senza internet di casa (o senza corrente) l'allarme NON parte.** Il dispositivo non
-> avvisa nessuno se è spento o scollegato dalla rete.
+**One-button emergency call button for bedridden patients and caregivers, with Pushover push notifications.**
 
-> **Stato della v1:** la logica è verificata con i test automatici e il firmware si avvia
-> sulla scheda, ma il percorso reale in rete (Wi-Fi → Pushover → telefono) **non è ancora
-> stato provato da capo a fondo**. Prima di farci affidamento, eseguire con i segreti veri i
-> test 1–4, 8 e 10 di [docs/manual-tests.md](docs/manual-tests.md).
+[![CI](https://github.com/frapsd/esp32-patient-alert/actions/workflows/ci.yml/badge.svg)](https://github.com/frapsd/esp32-patient-alert/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![PlatformIO](https://img.shields.io/badge/PlatformIO-espressif32%406.13.0-orange.svg)](https://platformio.org)
+[![ESP32](https://img.shields.io/badge/board-ESP32-red.svg)](https://www.espressif.com/en/products/socs/esp32)
 
-## Cosa fa
+**English** | [Italiano](README.it.md)
 
-Un ESP32 con un bottone e un LED. Il paziente preme il bottone e sui telefoni di chi lo
-assiste (familiari, badanti) arriva una notifica Pushover:
+> **WARNING: this is NOT a certified medical device and does NOT replace emergency services.**
+> **If the situation is serious, call emergency services immediately.**
+> **Without home internet (or without power) the alarm does NOT fire.** The device alerts
+> nobody if it is off or disconnected from the network.
 
-- **Richiesta leggera** (acqua, cambio posizione...): notifica normale, senza suoneria forte.
-- **Emergenza**: notifica Pushover a priorità 2. Suona anche col telefono in silenzio e si
-  ripete ogni 30 secondi finché qualcuno non preme "conferma" sul telefono.
+> **v1 status:** the logic is verified by automated tests and the firmware boots on the board,
+> but the real network path (Wi-Fi -> Pushover -> phone) has **not yet been tested end to end**.
+> Before relying on it, run tests 1-4, 8 and 10 in [docs/manual-tests.md](docs/manual-tests.md)
+> (in Italian) with your real secrets.
 
-Quando qualcuno conferma, il LED diventa fisso ("aiuto in arrivo") e gli altri ricevono il
-messaggio "<nome> ha preso in carico l'emergenza". Se nessuno conferma entro 1500 s (25 minuti),
-il dispositivo rimanda subito una nuova emergenza, senza interruzioni. Se il dispositivo si
-riavvia durante un'emergenza, la riprende da dove era: l'emergenza viene salvata in memoria
-prima di essere inviata. Se si riavvia (ad esempio per un calo di corrente) durante i 10
-minuti "confermata", il LED torna fisso e una pressione vale ancora come nuova emergenza;
-appena l'ora è sincronizzata, il LED resta fisso solo per il tempo che mancava davvero, o
-torna a riposo se i 10 minuti erano già finiti.
+## Features
 
-Principio: nel dubbio, emergenza.
+- **Light help request**: a normal Pushover notification (water, change of position...), no loud ringing.
+- **Emergency**: Pushover priority 2. It sounds even with the phone on silent and repeats every 30 seconds until a caregiver taps "acknowledge" on the phone.
+- **Acknowledgement feedback**: when someone acknowledges, the LED turns solid ("help is coming") and the other caregivers get a "<name> took charge of the emergency" message.
+- **Re-escalation**: if nobody acknowledges within 1500 s (25 minutes), a new emergency is sent immediately, without gaps.
+- **Survives reboots**: an emergency is saved to NVS before it is sent and resumed after a restart; the "confirmed" window is restored too.
+- **Offline-tolerant**: a press made without network is remembered and sent when the connection returns (the queue keeps at most 4 light requests, each with its press time).
+- **Secure transport**: TLS to `api.pushover.net` with certificate verification against embedded root CAs; never disabled.
+- **Watchdog**: a 60 s watchdog restarts the board if the main loop or the button/LED task hangs.
+- **Tested logic**: pure C++ in `lib/alert_core`, 64 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
 
-## Come si usa il bottone
+Principle: when in doubt, emergency.
 
-| Gesto | Effetto |
+## How it works
+
+```mermaid
+sequenceDiagram
+    participant P as Patient
+    participant E as ESP32 (button + LED)
+    participant W as Pushover
+    participant C as Caregivers' Android phones
+    P->>E: press button
+    E->>E: classify gesture, save state to NVS
+    E->>W: HTTPS (TLS verified) light request or emergency
+    W->>C: push notification
+    C->>W: acknowledge (emergency)
+    E->>W: poll receipt
+    W-->>E: acknowledged
+    E->>E: LED solid (confirmed window, 10 min)
+    W->>C: "<name> took charge" to the others
+```
+
+Until the emergency is acknowledged, Pushover repeats it every 30 s and the LED blinks fast.
+
+## Button gestures
+
+| Gesture | Effect |
 |---|---|
-| Pressione breve (meno di 1,5 s) | Richiesta leggera, parte subito |
-| Pressione tenuta 1,5 s o più | Emergenza (scatta allo scadere di 1,5 s, senza aspettare il rilascio) |
-| Un'altra pressione entro 60 s da una richiesta leggera | Emergenza |
-| Qualsiasi pressione mentre un'emergenza è attiva e non confermata | Nessun nuovo allarme (il LED continua a lampeggiare veloce) |
-| Qualsiasi pressione mentre il LED è fisso "confermata" | Nuova emergenza verso tutti |
-| Pressione dopo la fine della finestra "confermata" (10 minuti) | Come all'inizio: breve = leggera, lunga = emergenza |
+| Short press (under 1.5 s) | Light request, sent immediately |
+| Hold 1.5 s or more | Emergency (fires when 1.5 s elapse, without waiting for release) |
+| Another press within 60 s of a light request | Emergency |
+| Any press while an emergency is active and unacknowledged | No new alarm (LED keeps blinking fast) |
+| Any press while the LED is solid "confirmed" | New emergency to everyone |
+| Press after the "confirmed" window ends (10 minutes) | Back to normal: short = light, long = emergency |
 
-Se manca la rete, la pressione viene ricordata e l'invio parte appena la connessione torna.
-Una richiesta leggera in coda riporta l'ora della pressione ("Richiesta delle 14:32"); la
-coda tiene al massimo 4 richieste leggere.
+## LED patterns
 
-## Cosa dice il LED
-
-| LED | Significato |
+| LED | Meaning |
 |---|---|
-| Un lampo brevissimo (0,05 s) ogni 5 s | Tutto a posto: Wi-Fi e ora ok, nessun allarme |
-| Acceso 1 s, spento 1 s | Offline: niente Wi-Fi, oppure ora non ancora sincronizzata |
-| Fisso per 3 s | Richiesta leggera inviata |
-| Lampeggio veloce continuo (0,1 s acceso, 0,1 s spento) | Emergenza in invio o in attesa di conferma |
-| Fisso | Emergenza confermata, "aiuto in arrivo" (dura 10 minuti) |
-| Due lampi brevi ogni 2 s | Errore di configurazione: Pushover rifiuta le richieste (token o chiave sbagliati, quota mensile finita, ecc.) |
+| Very short flash (0.05 s) every 5 s | All good: Wi-Fi and time OK, no alarm |
+| On 1 s, off 1 s | Offline: no Wi-Fi, or time not yet synchronized |
+| Solid for 3 s | Light request sent |
+| Continuous fast blink (0.1 s on, 0.1 s off) | Emergency being sent or awaiting acknowledgement |
+| Solid | Emergency acknowledged, "help is coming" (lasts 10 minutes) |
+| Two short flashes every 2 s | Configuration error: Pushover rejects requests (wrong token or key, monthly quota exhausted, etc.) |
 
-Quando due situazioni sono vere insieme, vince la prima di questa lista:
+When several conditions hold at once, the first in this list wins: active emergency, confirmed emergency (within the 10-minute window), configuration error, offline, "light request sent" (3 s), idle. "Request sent" (3 s) and "confirmed" (10 min) are both solid and are told apart by duration.
 
-1. Emergenza attiva (lampeggio veloce) — resta così anche se la rete è assente.
-2. Emergenza confermata, finché dura la finestra di 10 minuti (fisso).
-3. Errore di configurazione.
-4. Offline.
-5. "Richiesta leggera inviata" (3 s).
-6. Riposo.
+## Hardware
 
-Nota: "richiesta inviata" (3 s) e "confermata" (10 min) sono entrambi fissi; si distinguono
-dalla durata.
+| Part | Notes |
+|---|---|
+| ESP32 dev board | Built for `esp32dev` (4 MB flash) |
+| Momentary push button | Wired between the GPIO pin and GND; the firmware enables the internal pull-up |
+| LED + series resistor | 220-330 ohm to GND, e.g. on GPIO26 or GPIO27, with `LED_ACTIVE_HIGH true` |
+| USB power supply | No backup battery in v1 |
 
-## Configurare Pushover
+Out of the box the button is the board's BOOT key (GPIO0) and the LED is the on-board one (GPIO2, check on your board) so you can try it without wiring. For the final hardware edit **only** `include/config.h` (`PIN_BUTTON`, `BUTTON_ACTIVE_LOW`, `PIN_LED`, `LED_ACTIVE_HIGH`).
 
-1. Creare un account su <https://pushover.net>.
-2. Installare l'app **Pushover** su **ogni telefono** che deve ricevere gli avvisi (Android) e
-   accedere con il proprio account. L'app è gratuita per 30 giorni di prova; poi serve una
-   licenza una tantum per ogni piattaforma (Android).
-3. Sul sito: **Create an Application/API Token**. Il valore ottenuto è il **token
-   dell'applicazione** (`PUSHOVER_APP_TOKEN`).
-4. Sul sito: **Create a Delivery Group** e aggiungere gli utenti che devono ricevere gli avvisi
-   (ognuno invita/ha il proprio account). La **chiave del gruppo** è `PUSHOVER_GROUP_KEY`.
-5. Su ogni telefono Android (importante: l'emergenza deve poter suonare):
-   - nell'app Pushover, consentire l'override di **Non disturbare** per le notifiche
-     di priorità emergenza;
-   - impostare un suono e un canale di notifica da **sveglia/allarme** per le emergenze
-     (il suono inviato è `persistent`, ogni utente può cambiarlo nell'app);
-   - nelle impostazioni Android, **disattivare l'ottimizzazione della batteria** per Pushover
-     e lasciare le notifiche attive.
-6. Limite: 10.000 messaggi al mese per applicazione. Un messaggio a un gruppo conta una volta
-   per ogni membro del gruppo.
-7. Provare tutto con la checklist in [docs/manual-tests.md](docs/manual-tests.md).
+- **Safe button pins:** GPIO25, GPIO26, GPIO27, GPIO32, GPIO33. Keep `BUTTON_ACTIVE_LOW true`.
+- **Avoid (button and LED):** GPIO0, 2, 5, 12, 15 (strapping pins; the level at power-up decides how the board boots, and the final button must not be on GPIO0); GPIO6-11 (internal flash); GPIO34-39 (input only, no internal pull-up, so the pin floats and produces phantom presses).
 
-## Segreti (`secrets.h`)
+## Quick start
+
+### 1. Set up Pushover
+
+1. Create an account at <https://pushover.net>.
+2. Install the **Pushover** app on **every Android phone** that should receive alerts and log in. The app has a 30-day free trial, then a one-time license per platform.
+3. On the website, **Create an Application/API Token**: this is `PUSHOVER_APP_TOKEN`.
+4. **Create a Delivery Group** and add the caregivers: the group key is `PUSHOVER_GROUP_KEY`.
+5. On each phone, so emergencies can actually sound: allow Do Not Disturb override for emergency-priority notifications in the Pushover app, set an alarm-style sound/channel (the firmware sends the `persistent` sound; users can change it in the app), and disable battery optimization for Pushover.
+6. Limit: 10,000 messages per month per application. A message to a group counts once per group member.
+
+### 2. Configure secrets
 
 ```
 cp include/secrets.example.h include/secrets.h
 ```
 
-Poi modificare `include/secrets.h` con SSID e password del Wi-Fi, token dell'applicazione e
-chiave del gruppo. Il file è escluso da git (`.gitignore`): non va mai committato né condiviso.
+Edit `include/secrets.h` with your Wi-Fi SSID and password, the application token and the group key. The file is gitignored: never commit or share it.
 
-## Compilare, testare, caricare
+### 3. Build, test, flash
 
-Serve PlatformIO. Installazione usata qui:
-
-```
-pipx install --python python3.12 platformio
-```
-
-(con il Python 3.14 di Homebrew `pipx install` non funziona). Il comando `pio` si trova in
-`~/.local/bin`. Piattaforma: `espressif32@6.13.0`.
+Requires [PlatformIO](https://platformio.org) (platform `espressif32@6.13.0`).
 
 ```
-pio test -e native      # test della logica sul computer, senza scheda
-pio run -e esp32dev     # compila il firmware
-pio run -e esp32dev -t upload   # carica sulla scheda
-pio device monitor      # log seriali a 115200
+pio test -e native              # logic tests on your computer, no board needed
+pio run -e esp32dev             # build the firmware
+pio run -e esp32dev -t upload   # flash the board
+pio device monitor              # serial logs at 115200
 ```
 
-La porta seriale è impostata in `platformio.ini` (`/dev/cu.usbserial-0001`); cambiarla se la
-scheda compare con un altro nome. I log non stampano token né chiavi.
+The serial port is set in `platformio.ini` (`/dev/cu.usbserial-0001`); change it if your board shows up under another name. Logs never print tokens or keys.
 
-### Backup e ripristino del firmware originale della scheda
-
-Prima di caricare il firmware la prima volta, fare un backup completo della flash (4 MB):
+Before the first flash, back up the board's original firmware (4 MB):
 
 ```
-esptool --port <porta> read-flash 0 0x400000 esp32-backup.bin
+esptool --port <port> read-flash 0 0x400000 esp32-backup.bin
+esptool --port <port> write-flash 0 esp32-backup.bin   # to restore it
 ```
 
-Per ripristinare il firmware originale:
+Then work through [docs/manual-tests.md](docs/manual-tests.md).
 
-```
-esptool --port <porta> write-flash 0 esp32-backup.bin
-```
+## Security
 
-## Sicurezza
+- Traffic to `api.pushover.net` is TLS-encrypted and the certificate is **verified** against root CAs embedded in the firmware (`include/pushover_ca.h`): DigiCert Global Root G2, DigiCert Global Root CA, ISRG Root X1, USERTrust RSA Certification Authority. The first two cover Pushover's current chain; the others are fallbacks. If the roots expire or Pushover changes chain, verification fails and the firmware must be updated.
+- The application token lives on the device and only allows **sending messages to the group**: someone who extracted it could cause false alarms, not read anything. Accepted risk; if it happens, regenerate the token on pushover.net.
+- Time comes from NTP (`pool.ntp.org`, `time.google.com`) because TLS verification needs it; until it is valid the device considers itself offline.
+- If Wi-Fi stays down for 60 s the device restarts the Wi-Fi connection. A 60 s watchdog reboots the board if the firmware hangs; alarm state restarts from NVS.
+- `secrets.h` never goes in git. To report a vulnerability see [SECURITY.md](SECURITY.md).
 
-- Le comunicazioni con `api.pushover.net` sono cifrate (TLS) e il certificato viene
-  **verificato** contro CA radice incorporate nel firmware (`include/pushover_ca.h`):
-  DigiCert Global Root G2, DigiCert Global Root CA, ISRG Root X1, USERTrust RSA Certification
-  Authority. Il controllo non è mai disattivato. Le prime due coprono la catena attuale di
-  Pushover; le altre sono di riserva se Pushover cambia autorità. Se le radici scadono o
-  Pushover cambia catena, la verifica fallisce e il firmware va aggiornato.
-- Il token dell'applicazione sta nel dispositivo e permette **solo di inviare messaggi al
-  gruppo**: chi lo estraesse potrebbe causare falsi allarmi, non leggere altro. Rischio
-  accettato; se succede, rigenerare il token su pushover.net.
-- `secrets.h` non va mai su git.
-- L'ora serve per la verifica TLS: viene presa via NTP (`pool.ntp.org`, `time.google.com`) e
-  finché non è valida il dispositivo si considera offline.
-- Se il Wi-Fi resta giù per 60 s, il dispositivo riavvia la connessione Wi-Fi. Se il firmware
-  si blocca (il ciclo principale o il task del bottone/LED), un watchdog (60 s) riavvia la
-  scheda; lo stato dell'allarme riparte dalla memoria.
+## Limitations
 
-## Spostare il bottone sul pin definitivo
+- Without internet or power the alarm does not fire, and nobody is told the device is out of service. USB power only, no backup battery.
+- Android only (the intended and tested target); no way to cancel a false alarm from the button.
+- v1 has not been validated end to end on a real network (see the status note above).
 
-Ora il bottone è il tasto BOOT (GPIO0) e il LED è quello di bordo (GPIO2, da verificare sulla
-propria scheda). Per l'hardware finale modificare **solo** `include/config.h`
-(`PIN_BUTTON`, `BUTTON_ACTIVE_LOW`, `PIN_LED`, `LED_ACTIVE_HIGH`).
+## Roadmap
 
-Il bottone definitivo **non deve stare su GPIO0**: quel pin decide la modalità di avvio, e se è
-premuto all'accensione la scheda non parte normalmente.
+- Heartbeat to healthchecks.io with a Pushover alert if the device goes silent (today an off or offline device alerts nobody).
+- Show the configuration error LED during an emergency too (today the fast emergency blink takes precedence, so the patient cannot see that alerts are not going out).
+- Immediate LED feedback on a long press even while another network request is in progress (today the fast blink starts when the main loop processes the gesture, up to a few tens of seconds later).
+- An LED signal for a queued light request that has not been sent yet.
+- Escalation by phone call (SIM module).
+- UPS / backup battery.
 
-**Pin sicuri per il bottone:** GPIO25, GPIO26, GPIO27, GPIO32, GPIO33. Il firmware attiva il
-pull-up interno (`INPUT_PULLUP`); collegare il bottone tra il pin e GND e lasciare
-`BUTTON_ACTIVE_LOW true`.
+## Contributing
 
-**Pin da evitare** (per il bottone e per il LED):
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Design documents are in [docs/](docs/README.md) (in Italian).
 
-| Pin | Perché |
-|---|---|
-| GPIO0, GPIO2, GPIO5, GPIO12, GPIO15 | Pin di "strapping": il loro livello all'accensione decide come parte la scheda. GPIO12 alto all'avvio impedisce l'avvio; GPIO2 qui è il LED di bordo. |
-| GPIO6–GPIO11 | Collegati alla memoria flash interna: usarli blocca la scheda. |
-| GPIO34–GPIO39 | Solo ingresso e **senza pull-up interno**: il pin resterebbe "flottante" e genererebbe pressioni fantasma. Inutilizzabili anche per il LED. |
+## License
 
-Per un LED esterno usare uno dei pin sicuri sopra (ad esempio GPIO26 o GPIO27, con una
-resistenza da 220–330 Ω in serie verso GND e `LED_ACTIVE_HIGH true`), mai uno dei pin da
-evitare.
-
-## Limiti
-
-- Senza internet o senza corrente l'allarme non parte, e nessuno è avvisato che il dispositivo
-  è fuori uso. Alimentazione solo USB, nessuna batteria tampone.
-- Solo Android testato/previsto; niente annullamento di un falso allarme dal bottone.
-
-## Prossimi passi
-
-- Heartbeat verso healthchecks.io con avviso Pushover se il dispositivo smette di farsi
-  sentire (oggi un dispositivo spento o offline non avvisa nessuno).
-- Segnalare l'errore di configurazione anche durante un'emergenza: oggi il lampeggio veloce
-  dell'emergenza ha la precedenza, quindi il paziente non vede che gli avvisi non escono.
-- LED immediato alla pressione lunga anche mentre è in corso un'altra richiesta di rete (oggi
-  il lampeggio veloce parte quando il ciclo principale elabora il gesto, fino a qualche
-  decina di secondi dopo).
-- Un segnale del LED per una richiesta leggera in coda (non ancora inviata).
-- Escalation con telefonata (modulo SIM).
-- UPS/batteria tampone.
+[MIT](LICENSE) (c) 2026 frapsd
