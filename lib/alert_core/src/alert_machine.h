@@ -26,7 +26,14 @@ struct Command {
 class AlertMachine {
  public:
   explicit AlertMachine(const MachineConfig&);
+  // nowEpoch 0 = wall time unknown. A saved Confirmed state then resumes with
+  // a full window from nowMs (presses still mean emergency) until
+  // onWallClock() can place the real window; NVS is left untouched meanwhile.
   void restore(const PersistedState&, uint32_t nowMs, uint32_t nowEpoch);
+  // Call regularly with the current wall time (0 = unknown). Resolves a
+  // Confirmed window restored without wall time: keeps only its real remaining
+  // time, or ends it if it is over. A no-op otherwise.
+  void onWallClock(uint32_t nowMs, uint32_t nowEpoch);
   // pressMs/pressEpoch: when the button was pressed (stamped by the button
   // task); nowMs: when the gesture is processed (may be later if the caller
   // was busy). Window decisions use the press time, timers use nowMs.
@@ -63,6 +70,7 @@ class AlertMachine {
   char receipt_[kReceiptLen] = {};
   uint32_t confirmedAtEpoch_ = 0;
   uint32_t confirmedAtMs_ = 0;
+  bool confirmUnresolved_ = false;  // Confirmed restored without wall time
   bool dirty_ = false;
   bool configError_ = false;
 

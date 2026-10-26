@@ -382,16 +382,28 @@ static void test_restore_confirmed_within_window_keeps_solid_led_for_remaining_t
   ASSERT_KIND(CommandKind::SendLight, drain(w2, 500100));
 }
 
-static void test_restore_confirmed_unknown_time_goes_idle() {
+static void test_restore_confirmed_unknown_time_stays_confirmed_until_clock() {
   PersistedState s;
   s.mode = Mode::Confirmed;
   s.confirmedAtEpoch = kEpoch;
   AlertMachine m(kCfg);
   m.restore(s, 1000, 0);
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  TEST_ASSERT_FALSE(m.takeDirty());  // NVS keeps the original confirmedAtEpoch
+  TEST_ASSERT_EQUAL_UINT32(kEpoch, m.persisted().confirmedAtEpoch);
+  ASSERT_LED(LedPattern::Confirmed, m.led(1000, false));
+  ASSERT_KIND(CommandKind::None, drain(m, 1000));
+  m.onWallClock(5000, 0);  // still no wall time: nothing changes
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  TEST_ASSERT_FALSE(m.takeDirty());
+  // Without a clock the full window runs from the restore.
+  ASSERT_LED(LedPattern::Confirmed, m.led(600999, true));
+  ASSERT_KIND(CommandKind::None, drain(m, 601000));
   ASSERT_MODE(Mode::Idle, m.mode());
   TEST_ASSERT_TRUE(m.takeDirty());
-  ASSERT_LED(LedPattern::Idle, m.led(1000, true));
-  ASSERT_KIND(CommandKind::None, drain(m, 1000));
+  m.onWallClock(602000, kEpoch + 100);  // late clock after the expiry: no effect
+  ASSERT_MODE(Mode::Idle, m.mode());
+  TEST_ASSERT_FALSE(m.takeDirty());
 
   AlertMachine past(kCfg);  // clock behind the stored time
   past.restore(s, 1000, kEpoch - 1);
@@ -404,7 +416,70 @@ static void test_restore_confirmed_unknown_time_goes_idle() {
   idle.restore(PersistedState(), 1000, 0);
   ASSERT_MODE(Mode::Idle, idle.mode());
   TEST_ASSERT_FALSE(idle.takeDirty());
+  idle.onWallClock(2000, kEpoch);
+  TEST_ASSERT_FALSE(idle.takeDirty());
   ASSERT_KIND(CommandKind::None, drain(idle, 1000));
+}
+
+static void test_wall_clock_resolves_confirmed_remaining_window() {
+  PersistedState s;
+  s.mode = Mode::Confirmed;
+  s.confirmedAtEpoch = kEpoch;
+  AlertMachine m(kCfg);
+  m.restore(s, 1000, 0);
+  // Clock arrives at t=21000: 100 s of the window had passed -> 500 s remain.
+  m.onWallClock(21000, kEpoch + 100);
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  TEST_ASSERT_FALSE(m.takeDirty());
+  ASSERT_LED(LedPattern::Confirmed, m.led(520999, true));
+  ASSERT_KIND(CommandKind::None, drain(m, 520999));
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  ASSERT_KIND(CommandKind::None, drain(m, 521000));
+  ASSERT_MODE(Mode::Idle, m.mode());
+  TEST_ASSERT_TRUE(m.takeDirty());
+
+  // Resolved once: a later clock reading does not move the window again.
+  AlertMachine r(kCfg);
+  r.restore(s, 1000, 0);
+  r.onWallClock(21000, kEpoch + 100);
+  r.onWallClock(22000, kEpoch + 50);
+  ASSERT_KIND(CommandKind::None, drain(r, 521000));
+  ASSERT_MODE(Mode::Idle, r.mode());
+}
+
+static void test_wall_clock_expires_stale_confirmed() {
+  PersistedState s;
+  s.mode = Mode::Confirmed;
+  s.confirmedAtEpoch = kEpoch;
+  AlertMachine m(kCfg);  // power was off longer than the window
+  m.restore(s, 1000, 0);
+  m.onWallClock(21000, kEpoch + 600);
+  ASSERT_MODE(Mode::Idle, m.mode());
+  TEST_ASSERT_TRUE(m.takeDirty());
+  ASSERT_LED(LedPattern::Idle, m.led(21000, true));
+  m.onGesture(Gesture::Tap, 22000, 22000, kEpoch + 601);
+  ASSERT_MODE(Mode::Idle, m.mode());  // now a plain light request
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 22000));
+
+  AlertMachine back(kCfg);  // clock behind the stored time: cannot trust it
+  back.restore(s, 1000, 0);
+  back.onWallClock(21000, kEpoch - 1);
+  ASSERT_MODE(Mode::Idle, back.mode());
+  TEST_ASSERT_TRUE(back.takeDirty());
+}
+
+static void test_tap_while_confirmed_unresolved_is_emergency() {
+  PersistedState s;
+  s.mode = Mode::Confirmed;
+  s.confirmedAtEpoch = kEpoch;
+  AlertMachine m(kCfg);
+  m.restore(s, 1000, 0);
+  m.onGesture(Gesture::Tap, 3000, 2500, 0);
+  ASSERT_MODE(Mode::EmergencyPending, m.mode());
+  TEST_ASSERT_TRUE(m.takeDirty());
+  ASSERT_KIND(CommandKind::SendEmergency, drain(m, 3000));
+  m.onWallClock(4000, kEpoch + 100);  // late clock must not touch the emergency
+  ASSERT_MODE(Mode::EmergencyPending, m.mode());
 }
 
 static void test_light_queue_capacity_4() {
@@ -544,7 +619,10 @@ int main(int, char**) {
   RUN_TEST(test_restore_pending_sends_now);
   RUN_TEST(test_restore_awaiting_without_receipt_resends);
   RUN_TEST(test_restore_confirmed_within_window_keeps_solid_led_for_remaining_time);
-  RUN_TEST(test_restore_confirmed_unknown_time_goes_idle);
+  RUN_TEST(test_restore_confirmed_unknown_time_stays_confirmed_until_clock);
+  RUN_TEST(test_wall_clock_resolves_confirmed_remaining_window);
+  RUN_TEST(test_wall_clock_expires_stale_confirmed);
+  RUN_TEST(test_tap_while_confirmed_unresolved_is_emergency);
   RUN_TEST(test_light_queue_capacity_4);
   RUN_TEST(test_emergency_has_priority_over_pending_light_and_ack_notice);
   RUN_TEST(test_wraparound_retry_timing);

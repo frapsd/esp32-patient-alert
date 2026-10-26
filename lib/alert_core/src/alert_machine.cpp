@@ -41,6 +41,7 @@ void AlertMachine::expireTimedState(uint32_t nowMs) {
   if (mode_ == Mode::Confirmed && confirmedExpired(nowMs)) {
     mode_ = Mode::Idle;
     confirmedAtEpoch_ = 0;
+    confirmUnresolved_ = false;
   }
   if (hasLastLightPress_ && (uint32_t)(nowMs - lastLightPressMs_) >= cfg_.lightUpgradeWindowMs) {
     hasLastLightPress_ = false;
@@ -56,6 +57,7 @@ void AlertMachine::triggerEmergency(uint32_t nowMs) {
   mode_ = Mode::EmergencyPending;
   receipt_[0] = '\0';
   confirmedAtEpoch_ = 0;
+  confirmUnresolved_ = false;
   emergencyTimer_.set(nowMs, 0);
   // A pending ack notice is kept.
 }
@@ -74,6 +76,7 @@ void AlertMachine::restore(const PersistedState& s, uint32_t nowMs, uint32_t now
   receipt_[0] = '\0';
   confirmedAtEpoch_ = 0;
   confirmedAtMs_ = 0;
+  confirmUnresolved_ = false;
   configError_ = false;
   ackPending_ = false;
   ackDevice_[0] = '\0';
@@ -94,7 +97,17 @@ void AlertMachine::restore(const PersistedState& s, uint32_t nowMs, uint32_t now
       emergencyTimer_.set(nowMs, 0);
       break;
     case Mode::Confirmed: {
-      if (nowEpoch == 0 || nowEpoch < s.confirmedAtEpoch) break;
+      if (nowEpoch == 0) {
+        // Wall time not known yet (e.g. just after a power cut): stay confirmed
+        // with a full window and let onWallClock() settle it. Keeping the saved
+        // epoch makes persisted() equal `s`, so NVS is not rewritten.
+        mode_ = Mode::Confirmed;
+        confirmedAtEpoch_ = s.confirmedAtEpoch;
+        confirmedAtMs_ = nowMs;
+        confirmUnresolved_ = true;
+        break;
+      }
+      if (nowEpoch < s.confirmedAtEpoch) break;
       uint32_t elapsedS = nowEpoch - s.confirmedAtEpoch;
       if (elapsedS >= cfg_.confirmedWindowS) break;
       mode_ = Mode::Confirmed;
@@ -106,6 +119,21 @@ void AlertMachine::restore(const PersistedState& s, uint32_t nowMs, uint32_t now
       break;
   }
   commit(s);
+}
+
+void AlertMachine::onWallClock(uint32_t nowMs, uint32_t nowEpoch) {
+  if (!confirmUnresolved_ || nowEpoch == 0) return;
+  confirmUnresolved_ = false;
+  if (mode_ != Mode::Confirmed) return;
+  PersistedState before = persisted();
+  const uint32_t elapsedS = nowEpoch - confirmedAtEpoch_;
+  if (nowEpoch < confirmedAtEpoch_ || elapsedS >= cfg_.confirmedWindowS) {
+    mode_ = Mode::Idle;
+    confirmedAtEpoch_ = 0;
+  } else {
+    confirmedAtMs_ = nowMs - elapsedS * 1000u;
+  }
+  commit(before);
 }
 
 void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t pressMs, uint32_t pressEpoch) {
@@ -122,7 +150,11 @@ void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t pressMs, uint32
   bool pressedBeforeConfirm = false;  // the emergency was still unacknowledged then
   if (mode_ == Mode::Confirmed) {
     const uint32_t confirmedAge = nowMs - confirmedAtMs_;
-    if (pressAge > confirmedAge) {
+    if (confirmUnresolved_ && pressAge > confirmedAge) {
+      // Pressed before the restore (cannot happen: the button task starts
+      // after it). The real window is unknown; nel dubbio, emergenza.
+      pressedWhileConfirmed = true;
+    } else if (pressAge > confirmedAge) {
       pressedBeforeConfirm = true;
     } else {
       pressedWhileConfirmed = confirmedAge - pressAge < cfg_.confirmedWindowS * 1000u;
