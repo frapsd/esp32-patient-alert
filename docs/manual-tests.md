@@ -28,9 +28,11 @@ Prima di iniziare: LED a riposo = un lampo brevissimo ogni 5 s (Wi-Fi e ora ok).
     l'emergenza".
 - [ ] **5. Pressione durante "confermata"**
   - Passi: a LED fisso (dopo il test 4) premere il bottone.
-  - LED: lampeggio veloce.
-  - Telefoni: nuova emergenza a tutti. Controllo: dopo i 10 minuti senza premere, il LED torna
-    a riposo, e una pressione breve vale di nuovo come richiesta leggera.
+  - LED: lampeggio veloce (inizia una NUOVA emergenza, non si torna a riposo).
+  - Telefoni: nuova emergenza a tutti, che suona e si ripete.
+  - Poi: confermarla di nuovo da un telefono; il LED torna fisso. Solo allora, lasciando passare i
+    10 minuti senza premere, il LED torna a riposo, e una pressione breve vale di nuovo come
+    richiesta leggera.
 - [ ] **6. Pressione durante emergenza non confermata**
   - Passi: dopo l'emergenza, senza confermare, premere ancora (breve e lunga).
   - LED: continua a lampeggiare veloce.
@@ -50,8 +52,13 @@ Prima di iniziare: LED a riposo = un lampo brevissimo ogni 5 s (Wi-Fi e ora ok).
   - LED: dopo il riavvio, lampeggio veloce subito.
   - Telefoni: se la ricevuta era già salvata il dispositivo riprende ad interrogarla senza
     reinviare; se non c'era, rimanda l'emergenza. Confermare: LED fisso.
-  - Variante: riavviare a LED fisso entro i 10 minuti; dopo il riavvio e la sincronizzazione
-    dell'ora il LED torna fisso per il tempo che resta.
+  - Variante: riavviare a LED fisso ("confermata", entro i 10 minuti). Comportamento atteso, non
+    un difetto: il riavvio legge lo stato salvato una sola volta, prima che Wi-Fi e ora (NTP)
+    siano pronti. Dopo un'interruzione di corrente l'ora non è nota, quindi lo stato "confermata"
+    normalmente NON viene ripristinato: il LED torna a riposo (o offline finché manca la rete) e
+    non parte nessun nuovo allarme, perché la conferma era già avvenuta. Dopo un reset software
+    (per esempio il watchdog) l'ESP32 potrebbe mantenere l'orologio e il LED fisso riprendere per
+    il tempo che resta: dipende dall'hardware e non è stato verificato.
 - [ ] **9. Scadenza senza conferma**
   - Solo in una build di prova, mai nel firmware vero: in
     `lib/alert_core/src/pushover_protocol.cpp`, nella funzione `emergencyBody`, abbassare
