@@ -1,3 +1,10 @@
 .pio/
 include/secrets.h
 .superpowers/
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.swp
