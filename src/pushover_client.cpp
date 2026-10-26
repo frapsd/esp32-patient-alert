@@ -12,10 +12,11 @@ constexpr const char* kHost = "api.pushover.net";
 constexpr uint16_t kPort = 443;
 constexpr size_t kMaxBody = 4096;
 
-// Watchdog budget: every library stage is bounded by kHttpTimeoutMs (15 s) and
-// the WDT is fed between groups of at most two stages, so no stretch between
-// feeds exceeds ~30 s of the 60 s watchdog:
-//   DNS (<=15 s) | TCP connect + TLS handshake (<=15 + 15 s) |
+// Watchdog budget: the WDT (60 s) is fed between these stretches, and none
+// exceeds ~31 s:
+//   DNS (<=~31 s: the core's hostByName() waits up to 16 s for the DNS-idle
+//     bit, then up to 15 s for the lookup itself) |
+//   TCP connect + TLS handshake (<=15 + 15 s, kHttpTimeoutMs each) |
 //   request write + response headers (<=15 + 15 s idle) | body (<=15 s total).
 // The socket is non-blocking (ssl_client), so available()/read() never stall.
 

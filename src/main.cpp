@@ -62,6 +62,18 @@ void logModeChange() {
   }
 }
 
+// Saves the persisted state when it changed. takeDirty() clears the flag, so a
+// failed save is retried from saveFailing on every call until it succeeds (a
+// lost EmergencyPending would come back Idle on reboot).
+void persistIfDirty() {
+  if (machine.takeDirty() || saveFailing) {
+    bool ok = nvsSave(machine.persisted());
+    if (!ok && !saveFailing) Serial.println("[nvs] state save failed, retrying");
+    if (ok && saveFailing) Serial.println("[nvs] state save recovered");
+    saveFailing = !ok;
+  }
+}
+
 // Executes one command synchronously and feeds its result back. Bodies and
 // paths contain the app token and are never logged.
 void execute(const Command& cmd) {
@@ -117,14 +129,15 @@ void setup() {
   lastMode = machine.mode();
   Serial.printf("[alert] restored mode=%s\n", modeName(lastMode));
 
-  gestureQueue = xQueueCreate(kGestureQueueLen, sizeof(GestureEvent));
-  ioSetPattern(lastLed);
-  ioStart(gestureQueue);
-  netBegin();
-
+  // The watchdog must exist before the io task subscribes to it.
   esp_task_wdt_init(kWatchdogS, true);  // panic => reboot; state comes back from NVS
   esp_task_wdt_add(nullptr);            // subscribe the loop task
-  Serial.printf("[boot] watchdog %us on loop task\n", (unsigned)kWatchdogS);
+
+  gestureQueue = xQueueCreate(kGestureQueueLen, sizeof(GestureEvent));
+  ioSetPattern(lastLed);
+  ioStart(gestureQueue);  // the io task subscribes itself to the watchdog
+  Serial.printf("[boot] watchdog %us on loop and io tasks\n", (unsigned)kWatchdogS);
+  netBegin();
 }
 
 void loop() {
@@ -138,8 +151,14 @@ void loop() {
     machine.onGesture(ev.g, now, ev.pressMs, ev.pressEpoch);
     logModeChange();
   }
+  // Spec: the emergency is in NVS before it is sent, so a power cut during the
+  // (blocking, up to tens of seconds) send cannot lose it. If this save fails
+  // the send still goes ahead; persistIfDirty() keeps retrying every loop.
+  persistIfDirty();
 
   netMaintain();
+  machine.onWallClock(millis(), netWallEpoch());  // settles a Confirmed restored without time
+  logModeChange();
 
   // AlertMachine has no in-flight tracking: nextCommand() keeps returning the
   // same command until its result is fed back. So call it at most once per
@@ -150,15 +169,7 @@ void loop() {
     execute(cmd);
     logModeChange();
   }
-
-  // takeDirty() clears the flag, so a failed save is retried from saveFailing
-  // until it succeeds (a lost EmergencyPending would come back Idle on reboot).
-  if (machine.takeDirty() || saveFailing) {
-    bool ok = nvsSave(machine.persisted());
-    if (!ok && !saveFailing) Serial.println("[nvs] state save failed, retrying");
-    if (ok && saveFailing) Serial.println("[nvs] state save recovered");
-    saveFailing = !ok;
-  }
+  persistIfDirty();
 
   LedPattern led = machine.led(millis(), netOnline());
   if (led != lastLed) {

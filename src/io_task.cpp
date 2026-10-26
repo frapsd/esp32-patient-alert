@@ -1,5 +1,6 @@
 #include "io_task.h"
 #include <Arduino.h>
+#include <esp_task_wdt.h>
 #include <atomic>
 #include "button_interpreter.h"
 #include "config.h"
@@ -16,9 +17,11 @@ QueueHandle_t gQueue = nullptr;
 std::atomic<uint8_t> gPattern{static_cast<uint8_t>(LedPattern::Offline)};
 
 void ioTask(void*) {
+  esp_task_wdt_add(nullptr);  // watchdog already initialised by setup()
   ButtonInterpreter button(kDebounceMs, kHoldMs);
   TickType_t lastWake = xTaskGetTickCount();
   for (;;) {
+    esp_task_wdt_reset();
     uint32_t now = millis();
     bool level = digitalRead(PIN_BUTTON) == HIGH;
     bool pressed = BUTTON_ACTIVE_LOW ? !level : level;
