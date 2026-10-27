@@ -22,6 +22,7 @@ QueueHandle_t gestureQueue = nullptr;
 Mode lastMode = Mode::Idle;
 LedPattern lastLed = LedPattern::Offline;
 bool saveFailing = false;  // last nvsSave failed: retry every iteration
+bool lastConfigError = false;
 
 const char* modeName(Mode m) {
   switch (m) {
@@ -58,6 +59,9 @@ void logModeChange() {
   Mode m = machine.mode();
   if (m != lastMode) {
     Serial.printf("[alert] mode %s -> %s\n", modeName(lastMode), modeName(m));
+    // Only an acknowledgement enters Confirmed after setup(), which seeds
+    // lastMode from the restored state: a reboot inside the window stays quiet.
+    if (m == Mode::Confirmed) ioPlayCue(Cue::Confirmed);
     lastMode = m;
   }
 }
@@ -104,6 +108,9 @@ void execute(const Command& cmd) {
       HttpOutcome o = parseSendResponse(r.code, r.body.c_str()).outcome;
       Serial.printf("[alert] light request sent: HTTP %d %s\n", r.code, outcomeName(o));
       machine.onLightSent(o, millis());
+      // From the outcome, not the LED: inside the confirmed window the solid
+      // LED hides LightSent, but the patient still needs to hear it went out.
+      if (o == HttpOutcome::Ok) ioPlayCue(Cue::LightSent);
       return;
     }
     case CommandKind::SendAckNotice: {
@@ -177,6 +184,27 @@ void loop() {
     lastLed = led;
   }
   ioSetPattern(led);
+
+  // The patient may not see the LED, so the buzzer carries the same news.
+  // While an emergency is live the reminder says whether it is getting out: a
+  // pending one offline or rejected would otherwise sound like help is coming.
+  // Once Pushover holds a receipt it keeps alerting the phones on its own.
+  const Mode mode = machine.mode();
+  const bool online = netOnline();
+  const bool configError = machine.configError();
+  Cue reminder = Cue::None;
+  if (mode == Mode::EmergencyAwaitingAck) {
+    reminder = Cue::EmergencyWaiting;
+  } else if (mode == Mode::EmergencyPending) {
+    // netOnline() only means Wi-Fi and a valid clock: the internet behind the
+    // router can still be down, which only a failed send reveals.
+    const bool gettingOut = online && !configError && !machine.emergencySendFailing();
+    reminder = gettingOut ? Cue::EmergencyWaiting : Cue::Failed;
+  }
+  // A configuration error outside an emergency sounds once, when it appears.
+  if (configError && !lastConfigError && reminder == Cue::None) ioPlayCue(Cue::Failed);
+  lastConfigError = configError;
+  ioSetAudioState(online && !configError, reminder);
 
   delay(kLoopDelayMs);
 }

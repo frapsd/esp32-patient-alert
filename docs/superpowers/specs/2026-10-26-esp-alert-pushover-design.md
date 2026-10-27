@@ -82,14 +82,13 @@ all'emergenza.
 
 | Gesto | Effetto |
 |---|---|
-| Pressione singola breve (< 1,5 s) | Richiesta leggera |
-| Pressione tenuta ≥ 1,5 s | Emergenza (scatta al raggiungimento della soglia, senza aspettare il rilascio) |
+| Pressione singola breve (< 1,5 s; 2,5 s dalla revisione del 2026-10-27) | Richiesta leggera |
+| Pressione tenuta ≥ 1,5 s (2,5 s dal 2026-10-27) | Emergenza (scatta al raggiungimento della soglia, senza aspettare il rilascio) |
 | Una nuova pressione qualsiasi entro 60 s da una richiesta leggera | Emergenza (copre il "premo di nuovo perché non arriva nessuno" e le pressioni ripetute in preda al panico) |
 | Qualsiasi pressione mentre un'emergenza è attiva (non confermata) | Nessun nuovo allarme; il LED ribadisce lo stato |
-| Qualsiasi pressione durante la finestra "confermata" (LED fisso, "aiuto in arrivo") | Nuova emergenza verso tutti (decisione dell'utente: probabilmente vuol dire "non è ancora arrivato nessuno" o "sto peggiorando") |
-| Pressione dopo la fine della finestra "confermata" | Ciclo normale (richiesta leggera o emergenza secondo le regole sopra) |
+| Qualsiasi pressione durante la finestra "confermata" (LED fisso, "aiuto in arrivo") | **Rivisto il 2026-10-27:** vale come sempre (breve = leggera, lunga o seconda entro 60 s = emergenza). In origine era una nuova emergenza verso tutti; cambiato per decisione dell'utente, perché il paziente non vede il LED fisso e non può sapere che la finestra è aperta. Una pressione fatta prima della conferma ed elaborata dopo resta ignorata. |
 
-Le soglie (1,5 s e 60 s) sono costanti configurabili. Il debounce è a carico
+Le soglie (2,5 s e 60 s) sono costanti configurabili. Il debounce è a carico
 del builder.
 
 La richiesta leggera parte subito alla prima pressione breve, senza attesa per

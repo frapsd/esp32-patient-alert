@@ -46,7 +46,14 @@ class AlertMachine {
   void onAckNoticeSent(HttpOutcome, uint32_t nowMs);
   Mode mode() const;
   LedPattern led(uint32_t nowMs, bool online) const;
-  bool takeDirty();                        // true once after any change to the persisted fields
+  // Pushover rejected the last request; cleared by the next accepted one.
+  bool configError() const { return configError_; }
+  // An emergency is waiting to be sent and its last attempt failed (no
+  // internet behind the Wi-Fi, Pushover down, TLS error...): nobody has it yet.
+  bool emergencySendFailing() const {
+    return mode_ == Mode::EmergencyPending && emergencySendFailed_;
+  }
+  bool takeDirty();                       // true once after any change to the persisted fields
   PersistedState persisted() const;
 
  private:
@@ -73,6 +80,7 @@ class AlertMachine {
   bool confirmUnresolved_ = false;  // Confirmed restored without wall time
   bool dirty_ = false;
   bool configError_ = false;
+  bool emergencySendFailed_ = false;  // last SendEmergency for this emergency failed
 
   Timer emergencyTimer_;  // send in EmergencyPending, poll in EmergencyAwaitingAck
 

@@ -58,6 +58,7 @@ void AlertMachine::triggerEmergency(uint32_t nowMs) {
   receipt_[0] = '\0';
   confirmedAtEpoch_ = 0;
   confirmUnresolved_ = false;
+  emergencySendFailed_ = false;
   emergencyTimer_.set(nowMs, 0);
   // A pending ack notice is kept.
 }
@@ -78,6 +79,7 @@ void AlertMachine::restore(const PersistedState& s, uint32_t nowMs, uint32_t now
   confirmedAtMs_ = 0;
   confirmUnresolved_ = false;
   configError_ = false;
+  emergencySendFailed_ = false;
   ackPending_ = false;
   ackDevice_[0] = '\0';
   lightCount_ = 0;
@@ -146,19 +148,15 @@ void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t pressMs, uint32
   const uint32_t pressAge = nowMs - pressMs;
 
   // Decide against the state as it was at the press, before expiring it at nowMs.
-  bool pressedWhileConfirmed = false;
-  bool pressedBeforeConfirm = false;  // the emergency was still unacknowledged then
-  if (mode_ == Mode::Confirmed) {
-    const uint32_t confirmedAge = nowMs - confirmedAtMs_;
-    if (confirmUnresolved_ && pressAge > confirmedAge) {
-      // Pressed before the restore (cannot happen: the button task starts
-      // after it). The real window is unknown; nel dubbio, emergenza.
-      pressedWhileConfirmed = true;
-    } else if (pressAge > confirmedAge) {
-      pressedBeforeConfirm = true;
-    } else {
-      pressedWhileConfirmed = confirmedAge - pressAge < cfg_.confirmedWindowS * 1000u;
-    }
+  // A press stamped before the acknowledgement was made against an emergency
+  // that was still unacknowledged, and carried no new information then.
+  // The confirmed window itself does not change how a gesture reads: inside it
+  // a Tap is still a light request and a Hold still an emergency. Forcing every
+  // press to an emergency for ten minutes took the choice away from the patient,
+  // who cannot see the LED that says the window is open.
+  bool pressedBeforeConfirm = false;
+  if (mode_ == Mode::Confirmed && !confirmUnresolved_) {
+    pressedBeforeConfirm = pressAge > nowMs - confirmedAtMs_;
   }
   bool upgrade = false;
   if (hasLastLightPress_) {
@@ -169,8 +167,6 @@ void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t pressMs, uint32
   expireTimedState(nowMs);
   if (mode_ == Mode::EmergencyPending || mode_ == Mode::EmergencyAwaitingAck) {
     // already raising an emergency
-  } else if (pressedWhileConfirmed) {
-    triggerEmergency(nowMs);
   } else if (pressedBeforeConfirm) {
     // pressed while the emergency was unacknowledged: ignored
   } else if (g == Gesture::Hold || upgrade) {
@@ -212,6 +208,7 @@ void AlertMachine::onEmergencySent(const SendResponse& r, uint32_t nowMs) {
   PersistedState before = persisted();
   HttpOutcome o = r.outcome;
   if (o == HttpOutcome::Ok && r.receipt[0] == '\0') o = HttpOutcome::Transient;
+  emergencySendFailed_ = o != HttpOutcome::Ok;
   if (o == HttpOutcome::Ok) {
     configError_ = false;
     copyStr(receipt_, sizeof(receipt_), r.receipt);

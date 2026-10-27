@@ -11,6 +11,9 @@ class ButtonInterpreter {
   ButtonInterpreter(uint32_t debounceMs, uint32_t holdMs)
       : debounceMs_(debounceMs), holdMs_(holdMs) {}
   std::optional<Gesture> update(bool pressed, uint32_t nowMs);
+  // Debounced level, for feedback that must fire at the press: a Tap is
+  // only known at release, up to holdMs later.
+  bool pressedStable() const { return stable_; }
 
  private:
   uint32_t debounceMs_;

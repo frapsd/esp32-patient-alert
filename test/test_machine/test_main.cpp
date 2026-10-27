@@ -181,17 +181,55 @@ static void test_emergency_ack_flow() {
   ASSERT_MODE(Mode::Idle, m.persisted().mode);
 }
 
-static void test_press_during_confirmed_is_emergency() {
+// Inside the confirmed window a gesture still means what it always means: the
+// patient cannot see the solid LED, so the window must not reinterpret them.
+static void test_tap_during_confirmed_is_a_light_request() {
   AlertMachine m(kCfg);
   uint32_t t = toConfirmed(m, 0, "pixel-marco");
   ASSERT_KIND(CommandKind::SendAckNotice, drain(m, t));
   m.onAckNoticeSent(HttpOutcome::Ok, t);
   m.onGesture(Gesture::Tap, t + 20000, t + 20000, kEpoch + 30);
+  ASSERT_MODE(Mode::Confirmed, m.mode());  // the window keeps running
+  ASSERT_KIND(CommandKind::SendLight, drain(m, t + 20000));
+  ASSERT_LED(LedPattern::Confirmed, m.led(t + 20000, true));
+}
+
+static void test_hold_during_confirmed_is_still_an_emergency() {
+  AlertMachine m(kCfg);
+  uint32_t t = toConfirmed(m, 0, "pixel-marco");
+  ASSERT_KIND(CommandKind::SendAckNotice, drain(m, t));
+  m.onAckNoticeSent(HttpOutcome::Ok, t);
+  m.onGesture(Gesture::Hold, t + 20000, t + 20000, kEpoch + 30);
   ASSERT_MODE(Mode::EmergencyPending, m.mode());
   TEST_ASSERT_TRUE(m.takeDirty());
   TEST_ASSERT_EQUAL_STRING("", m.persisted().receipt);
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, t + 20000));
   ASSERT_LED(LedPattern::EmergencyActive, m.led(t + 20000, true));
+}
+
+// Two taps inside the window still escalate: the upgrade rule is untouched.
+static void test_second_tap_during_confirmed_still_upgrades() {
+  AlertMachine m(kCfg);
+  uint32_t t = toConfirmed(m, 0, "pixel-marco");
+  ASSERT_KIND(CommandKind::SendAckNotice, drain(m, t));
+  m.onAckNoticeSent(HttpOutcome::Ok, t);
+  m.onGesture(Gesture::Tap, t + 20000, t + 20000, kEpoch + 30);
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  m.onGesture(Gesture::Tap, t + 40000, t + 40000, kEpoch + 50);
+  ASSERT_MODE(Mode::EmergencyPending, m.mode());
+}
+
+// The one case the confirmed window still reinterprets: a gesture stamped
+// before the acknowledgement was made against an unacknowledged emergency and
+// said nothing new, so draining it late must not raise a fresh request.
+static void test_press_stamped_before_the_ack_is_dropped() {
+  AlertMachine m(kCfg);
+  uint32_t t = toConfirmed(m, 0, "phone");  // acknowledged at t
+  ASSERT_KIND(CommandKind::SendAckNotice, drain(m, t));
+  m.onAckNoticeSent(HttpOutcome::Ok, t);
+  m.onGesture(Gesture::Tap, t + 2000, t - 5000, kEpoch + 5);
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  ASSERT_KIND(CommandKind::None, drain(m, t + 2000));
 }
 
 static void test_press_during_awaiting_ack_ignored() {
@@ -234,12 +272,49 @@ static void test_emergency_survives_repeated_transient_failures() {
   ASSERT_LED(LedPattern::EmergencyActive, m.led(t, false));
 }
 
+// Wi-Fi up but no internet behind it: only a failed send shows that the
+// emergency is not getting out, and the buzzer reminder reads it from here.
+static void test_emergency_send_failing_tracks_the_last_attempt() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Hold, 0, 0, kEpoch);
+  TEST_ASSERT_FALSE(m.emergencySendFailing());  // not tried yet
+  ASSERT_KIND(CommandKind::SendEmergency, drain(m, 0));
+  m.onEmergencySent(sendResult(HttpOutcome::Transient, ""), 0);
+  TEST_ASSERT_TRUE(m.emergencySendFailing());
+  TEST_ASSERT_FALSE(m.configError());
+  m.onEmergencySent(sendResult(HttpOutcome::Ok, ""), 5000);  // no receipt: still a failure
+  TEST_ASSERT_TRUE(m.emergencySendFailing());
+  m.onEmergencySent(sendResult(HttpOutcome::Ok, "r1"), 10000);
+  ASSERT_MODE(Mode::EmergencyAwaitingAck, m.mode());
+  TEST_ASSERT_FALSE(m.emergencySendFailing());
+
+  // Expired unacknowledged: a fresh emergency starts with a clean slate.
+  AlertMachine n(kCfg);
+  n.onGesture(Gesture::Hold, 0, 0, kEpoch);
+  n.onEmergencySent(sendResult(HttpOutcome::Transient, ""), 0);
+  TEST_ASSERT_TRUE(n.emergencySendFailing());
+  n.onEmergencySent(sendResult(HttpOutcome::Ok, "r1"), 5000);
+  n.onReceipt(receiptResult(HttpOutcome::Ok, false, true, ""), 15000, kEpoch + 15);
+  ASSERT_MODE(Mode::EmergencyPending, n.mode());
+  TEST_ASSERT_FALSE(n.emergencySendFailing());
+
+  // A reboot forgets the failure; the first send after it decides again.
+  PersistedState s;
+  s.mode = Mode::EmergencyPending;
+  AlertMachine r(kCfg);
+  r.restore(s, 100, kEpoch);
+  TEST_ASSERT_FALSE(r.emergencySendFailing());
+}
+
 static void test_rejected_send_waits_300s_and_shows_config_error() {
   AlertMachine m(kCfg);
   m.onGesture(Gesture::Hold, 0, 0, kEpoch);
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, 0));
+  TEST_ASSERT_FALSE(m.configError());
   m.onEmergencySent(sendResult(HttpOutcome::Rejected, ""), 0);
   ASSERT_MODE(Mode::EmergencyPending, m.mode());
+  // The LED hides it behind the emergency; the buzzer reminder reads it here.
+  TEST_ASSERT_TRUE(m.configError());
   ASSERT_LED(LedPattern::EmergencyActive, m.led(0, true));
   ASSERT_LED(LedPattern::EmergencyActive, m.led(1000, false));
   ASSERT_KIND(CommandKind::None, drain(m, 5000));
@@ -249,6 +324,8 @@ static void test_rejected_send_waits_300s_and_shows_config_error() {
   ASSERT_KIND(CommandKind::None, drain(m, 599999));
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, 600000));
   m.onEmergencySent(sendResult(HttpOutcome::Ok, "r1"), 600000);
+  TEST_ASSERT_FALSE(m.configError());
+  TEST_ASSERT_FALSE(m.emergencySendFailing());
 
   // Through to Idle; the Ok cleared the error.
   ASSERT_KIND(CommandKind::PollReceipt, drain(m, 610000));
@@ -373,13 +450,10 @@ static void test_restore_confirmed_within_window_keeps_solid_led_for_remaining_t
   AlertMachine w(kCfg);
   w.restore(s, 100, kEpoch + 100);
   ASSERT_MODE(Mode::Confirmed, w.mode());
-  w.onGesture(Gesture::Tap, 499999 + 100, 499999 + 100, kEpoch + 599);
-  ASSERT_MODE(Mode::EmergencyPending, w.mode());  // still confirmed -> new emergency
-  AlertMachine w2(kCfg);
-  w2.restore(s, 100, kEpoch + 100);
-  w2.onGesture(Gesture::Tap, 500000 + 100, 500000 + 100, kEpoch + 600);
-  ASSERT_MODE(Mode::Idle, w2.mode());  // window over -> plain light request
-  ASSERT_KIND(CommandKind::SendLight, drain(w2, 500100));
+  ASSERT_LED(LedPattern::Confirmed, w.led(499999 + 100, true));
+  ASSERT_LED(LedPattern::Idle, w.led(500000 + 100, true));
+  ASSERT_KIND(CommandKind::None, drain(w, 500000 + 100));
+  ASSERT_MODE(Mode::Idle, w.mode());
 }
 
 static void test_restore_confirmed_unknown_time_stays_confirmed_until_clock() {
@@ -468,13 +542,26 @@ static void test_wall_clock_expires_stale_confirmed() {
   TEST_ASSERT_TRUE(back.takeDirty());
 }
 
-static void test_tap_while_confirmed_unresolved_is_emergency() {
+static void test_tap_while_confirmed_unresolved_is_a_light_request() {
   PersistedState s;
   s.mode = Mode::Confirmed;
   s.confirmedAtEpoch = kEpoch;
   AlertMachine m(kCfg);
   m.restore(s, 1000, 0);
   m.onGesture(Gesture::Tap, 3000, 2500, 0);
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 3000));
+  m.onWallClock(4000, kEpoch + 100);  // 100 s in: the window still has time left
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+}
+
+static void test_hold_while_confirmed_unresolved_is_emergency() {
+  PersistedState s;
+  s.mode = Mode::Confirmed;
+  s.confirmedAtEpoch = kEpoch;
+  AlertMachine m(kCfg);
+  m.restore(s, 1000, 0);
+  m.onGesture(Gesture::Hold, 3000, 2500, 0);
   ASSERT_MODE(Mode::EmergencyPending, m.mode());
   TEST_ASSERT_TRUE(m.takeDirty());
   ASSERT_KIND(CommandKind::SendEmergency, drain(m, 3000));
@@ -520,7 +607,7 @@ static void test_emergency_has_priority_over_pending_light_and_ack_notice() {
   // Unsent ack notice waits behind a new emergency, and is kept.
   AlertMachine b(kCfg);
   uint32_t t = toConfirmed(b, 0, "pixel-marco");
-  b.onGesture(Gesture::Tap, t + 1000, t + 1000, kEpoch);
+  b.onGesture(Gesture::Hold, t + 1000, t + 1000, kEpoch);
   ASSERT_KIND(CommandKind::SendEmergency, drain(b, t + 1000));
   b.onEmergencySent(sendResult(HttpOutcome::Ok, "r2"), t + 1000);
   Command c = b.nextCommand(t + 1000);
@@ -579,12 +666,14 @@ static void test_late_drained_second_tap_still_upgrades() {
   ASSERT_MODE(Mode::Idle, n.mode());
 }
 
-static void test_press_inside_confirmed_window_drained_after_expiry_is_emergency() {
+static void test_press_inside_confirmed_window_drained_after_expiry_is_a_light_request() {
   AlertMachine m(kCfg);
   uint32_t t = toConfirmed(m, 0, "phone");
   m.onGesture(Gesture::Tap, t + 620000, t + 599000, kEpoch + 609);
-  ASSERT_MODE(Mode::EmergencyPending, m.mode());
-  ASSERT_KIND(CommandKind::SendEmergency, drain(m, t + 620000));
+  ASSERT_MODE(Mode::Idle, m.mode());
+  ASSERT_KIND(CommandKind::SendAckNotice, drain(m, t + 620000));
+  m.onAckNoticeSent(HttpOutcome::Ok, t + 620000);
+  ASSERT_KIND(CommandKind::SendLight, drain(m, t + 620000));
 
   // Pressed just after the window closed, drained later: light request.
   AlertMachine n(kCfg);
@@ -608,9 +697,13 @@ int main(int, char**) {
   RUN_TEST(test_second_tap_after_60s_is_light);
   RUN_TEST(test_mashing_produces_single_emergency);
   RUN_TEST(test_emergency_ack_flow);
-  RUN_TEST(test_press_during_confirmed_is_emergency);
+  RUN_TEST(test_tap_during_confirmed_is_a_light_request);
+  RUN_TEST(test_hold_during_confirmed_is_still_an_emergency);
+  RUN_TEST(test_second_tap_during_confirmed_still_upgrades);
+  RUN_TEST(test_press_stamped_before_the_ack_is_dropped);
   RUN_TEST(test_press_during_awaiting_ack_ignored);
   RUN_TEST(test_emergency_survives_repeated_transient_failures);
+  RUN_TEST(test_emergency_send_failing_tracks_the_last_attempt);
   RUN_TEST(test_rejected_send_waits_300s_and_shows_config_error);
   RUN_TEST(test_expired_unacked_receipt_resends_emergency);
   RUN_TEST(test_receipt_rejected_resends_after_300s);
@@ -622,11 +715,12 @@ int main(int, char**) {
   RUN_TEST(test_restore_confirmed_unknown_time_stays_confirmed_until_clock);
   RUN_TEST(test_wall_clock_resolves_confirmed_remaining_window);
   RUN_TEST(test_wall_clock_expires_stale_confirmed);
-  RUN_TEST(test_tap_while_confirmed_unresolved_is_emergency);
+  RUN_TEST(test_tap_while_confirmed_unresolved_is_a_light_request);
+  RUN_TEST(test_hold_while_confirmed_unresolved_is_emergency);
   RUN_TEST(test_light_queue_capacity_4);
   RUN_TEST(test_emergency_has_priority_over_pending_light_and_ack_notice);
   RUN_TEST(test_wraparound_retry_timing);
   RUN_TEST(test_late_drained_second_tap_still_upgrades);
-  RUN_TEST(test_press_inside_confirmed_window_drained_after_expiry_is_emergency);
+  RUN_TEST(test_press_inside_confirmed_window_drained_after_expiry_is_a_light_request);
   return UNITY_END();
 }

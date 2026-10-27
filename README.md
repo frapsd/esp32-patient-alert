@@ -29,9 +29,10 @@
 - **Offline-tolerant**: a press made without network is remembered and sent when the connection returns (the queue keeps at most 4 light requests, each with its press time).
 - **Secure transport**: TLS to `api.pushover.net` with certificate verification against embedded root CAs; never disabled.
 - **Watchdog**: a 60 s watchdog restarts the board if the main loop or the button/LED task hangs.
-- **Tested logic**: pure C++ in `lib/alert_core`, 64 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
+- **Buzzer cues**: every press, sent request, acknowledgement and live emergency also has a sound, for a patient who cannot see the LED.
+- **Tested logic**: pure C++ in `lib/alert_core`, 91 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
 
-Principle: when in doubt, emergency.
+Principle: when in doubt, emergency. The one exception is the 10-minute "confirmed" window: there a gesture means what it always means, because a patient who cannot see the solid LED cannot know the window is open.
 
 ## How it works
 
@@ -58,12 +59,11 @@ Until the emergency is acknowledged, Pushover repeats it every 30 s and the LED 
 
 | Gesture | Effect |
 |---|---|
-| Short press (under 1.5 s) | Light request, sent immediately |
-| Hold 1.5 s or more | Emergency (fires when 1.5 s elapse, without waiting for release) |
+| Short press (under 2.5 s) | Light request, sent immediately |
+| Hold 2.5 s or more | Emergency (fires when 2.5 s elapse, without waiting for release) |
 | Another press within 60 s of a light request | Emergency |
 | Any press while an emergency is active and unacknowledged | No new alarm (LED keeps blinking fast) |
-| Any press while the LED is solid "confirmed" | New emergency to everyone |
-| Press after the "confirmed" window ends (10 minutes) | Back to normal: short = light, long = emergency |
+| Press while the LED is solid "confirmed" | As always: short = light, long = emergency |
 
 ## LED patterns
 
@@ -78,6 +78,23 @@ Until the emergency is acknowledged, Pushover repeats it every 30 s and the LED 
 
 When several conditions hold at once, the first in this list wins: active emergency, confirmed emergency (within the 10-minute window), configuration error, offline, "light request sent" (3 s), idle. "Request sent" (3 s) and "confirmed" (10 min) are both solid and are told apart by duration.
 
+## Buzzer cues
+
+The buzzer repeats what the LED says, for a patient who cannot see it. Tones stay between 500 Hz and 1.8 kHz and no step is shorter than 130 ms, for listeners with age-related hearing loss.
+
+| Sound | Meaning |
+|---|---|
+| One high beep (0.3 s) as soon as the button goes down | Press registered |
+| One low beep (0.3 s) as soon as the button goes down | Press registered, but nothing can be sent now (offline or configuration error); a light request is queued |
+| Fast warble (about 0.8 s) after holding 2.5 s | Emergency armed, the button can be released |
+| Two beeps | Light request delivered to Pushover (also inside the confirmed window, where the LED stays solid) |
+| Rising three-note phrase, twice | Someone acknowledged the emergency |
+| Short warble, repeated | Emergency live and not yet acknowledged: every 5 s for the first 2 minutes, then every 30 s |
+| Two long low tones, repeated on the same schedule | Emergency live but **not getting out**: no Wi-Fi, a failed send (Wi-Fi up but no internet, Pushover unreachable), or Pushover rejects it |
+| Two long low tones, once | Configuration error outside an emergency |
+
+A press always sounds at once, cutting short any other cue; the other news waits until the buzzer is silent, and news cut short by a press plays again afterwards.
+
 ## Hardware
 
 | Part | Notes |
@@ -85,12 +102,13 @@ When several conditions hold at once, the first in this list wins: active emerge
 | ESP32 dev board | Built for `esp32dev` (4 MB flash) |
 | Momentary push button | Wired between the GPIO pin and GND; the firmware enables the internal pull-up |
 | LED + series resistor | 220-330 ohm to GND, e.g. on GPIO26 or GPIO27, with `LED_ACTIVE_HIGH true` |
+| Passive piezo buzzer | Between GPIO32 and GPIO33, driven in antiphase for twice the voltage swing. A magnetic buzzer draws far more current than a GPIO can supply (often 80-200 mA against about 40 mA): drive it from `PIN_BUZZER` through a transistor (NPN with a base resistor, flyback diode across the coil) and set `PIN_BUZZER_N -1`. Not an "active" buzzer (one with its own oscillator): it cannot play the tones |
 | USB power supply | No backup battery in v1 |
 
-Out of the box the button is the board's BOOT key (GPIO0) and the LED is the on-board one (GPIO2, check on your board) so you can try it without wiring. For the final hardware edit **only** `include/config.h` (`PIN_BUTTON`, `BUTTON_ACTIVE_LOW`, `PIN_LED`, `LED_ACTIVE_HIGH`).
+Out of the box the button is on GPIO25, the LED on GPIO27 and the buzzer on GPIO32/GPIO33. To use other pins edit **only** `include/config.h` (`PIN_BUTTON`, `BUTTON_ACTIVE_LOW`, `PIN_LED`, `LED_ACTIVE_HIGH`, `PIN_BUZZER`, `PIN_BUZZER_N`). To try the firmware on a bare board, `PIN_BUTTON 0` and `PIN_LED 2` use the BOOT key and the on-board LED (GPIO2 on many boards, check yours).
 
-- **Safe button pins:** GPIO25, GPIO26, GPIO27, GPIO32, GPIO33. Keep `BUTTON_ACTIVE_LOW true`.
-- **Avoid (button and LED):** GPIO0, 2, 5, 12, 15 (strapping pins; the level at power-up decides how the board boots, and the final button must not be on GPIO0); GPIO6-11 (internal flash); GPIO34-39 (input only, no internal pull-up, so the pin floats and produces phantom presses).
+- **Safe pins (button, LED, buzzer):** GPIO25, GPIO26, GPIO27, GPIO32, GPIO33. Keep `BUTTON_ACTIVE_LOW true`.
+- **Avoid (button, LED, buzzer):** GPIO0, 2, 5, 12, 15 (strapping pins; the level at power-up decides how the board boots, and the final button must not be on GPIO0); GPIO6-11 (internal flash); GPIO34-39 (input only, no internal pull-up, so the pin floats and produces phantom presses).
 
 ## Quick start
 
@@ -150,8 +168,8 @@ Then work through [docs/manual-tests.md](docs/manual-tests.md).
 ## Roadmap
 
 - Heartbeat to healthchecks.io with a Pushover alert if the device goes silent (today an off or offline device alerts nobody).
-- Show the configuration error LED during an emergency too (today the fast emergency blink takes precedence, so the patient cannot see that alerts are not going out).
-- Immediate LED feedback on a long press even while another network request is in progress (today the fast blink starts when the main loop processes the gesture, up to a few tens of seconds later).
+- Show the configuration error LED during an emergency too (today the fast emergency blink takes precedence; only the buzzer tells the patient that alerts are not going out).
+- Immediate LED feedback on a long press even while another network request is in progress (today the fast blink starts when the main loop processes the gesture, up to a few tens of seconds later; the buzzer already sounds at once).
 - An LED signal for a queued light request that has not been sent yet.
 - Escalation by phone call (SIM module).
 - UPS / backup battery.

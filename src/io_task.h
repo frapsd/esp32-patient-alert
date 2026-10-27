@@ -2,6 +2,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "alert_types.h"
+#include "buzzer_cue.h"
 
 // Button + LED task, pinned to core 0 so both keep working while the loop task
 // (core 1) is blocked in an HTTPS request. Gestures go to `gestureQueue`
@@ -20,3 +21,9 @@ struct GestureEvent {
 
 void ioStart(QueueHandle_t gestureQueue);
 void ioSetPattern(LedPattern);
+// Queues one cue for the buzzer; callable from the loop task. It plays once the
+// buzzer is silent. Only the latest unplayed cue is kept.
+void ioPlayCue(Cue);
+// canSend picks the press cue (Press or PressOffline). reminder is repeated
+// while an emergency is live, Cue::None otherwise.
+void ioSetAudioState(bool canSend, Cue reminder);
