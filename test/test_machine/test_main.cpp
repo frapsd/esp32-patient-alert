@@ -232,6 +232,44 @@ static void test_press_stamped_before_the_ack_is_dropped() {
   ASSERT_KIND(CommandKind::None, drain(m, t + 2000));
 }
 
+// A Hold is stamped at its threshold: one that fired while the emergency was
+// still unacknowledged said nothing new, even if the loop, blocked in the poll
+// that brought the ack, only processes it afterwards.
+static void test_hold_fired_before_the_ack_is_dropped() {
+  AlertMachine m(kCfg);
+  uint32_t t = toConfirmed(m, 0, "phone");  // acknowledged at t
+  ASSERT_KIND(CommandKind::SendAckNotice, drain(m, t));
+  m.onAckNoticeSent(HttpOutcome::Ok, t);
+  m.onGesture(Gesture::Hold, t + 1500, t - 1000, kEpoch + 5);
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  ASSERT_KIND(CommandKind::None, drain(m, t + 1500));
+}
+
+// The press beep needs to know whether requests are getting out at all, not
+// only emergency ones: any request's outcome counts, the latest one wins.
+static void test_last_request_failed_tracks_every_request() {
+  AlertMachine m(kCfg);
+  TEST_ASSERT_FALSE(m.lastRequestFailed());
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 0));
+  m.onLightSent(HttpOutcome::Transient, 0);
+  TEST_ASSERT_TRUE(m.lastRequestFailed());
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 5000));
+  m.onLightSent(HttpOutcome::Ok, 5000);
+  TEST_ASSERT_FALSE(m.lastRequestFailed());
+
+  uint32_t t = toConfirmed(m, 100000, "phone");
+  ASSERT_KIND(CommandKind::SendAckNotice, drain(m, t));
+  m.onAckNoticeSent(HttpOutcome::Transient, t);
+  TEST_ASSERT_TRUE(m.lastRequestFailed());
+
+  AlertMachine p(kCfg);
+  toAwaitingAck(p, 0, "r1");
+  ASSERT_KIND(CommandKind::PollReceipt, drain(p, 10000));
+  p.onReceipt(receiptResult(HttpOutcome::Transient, false, false, ""), 10000, kEpoch + 10);
+  TEST_ASSERT_TRUE(p.lastRequestFailed());
+}
+
 static void test_press_during_awaiting_ack_ignored() {
   AlertMachine m(kCfg);
   toAwaitingAck(m, 0, "r1");
@@ -701,6 +739,8 @@ int main(int, char**) {
   RUN_TEST(test_hold_during_confirmed_is_still_an_emergency);
   RUN_TEST(test_second_tap_during_confirmed_still_upgrades);
   RUN_TEST(test_press_stamped_before_the_ack_is_dropped);
+  RUN_TEST(test_hold_fired_before_the_ack_is_dropped);
+  RUN_TEST(test_last_request_failed_tracks_every_request);
   RUN_TEST(test_press_during_awaiting_ack_ignored);
   RUN_TEST(test_emergency_survives_repeated_transient_failures);
   RUN_TEST(test_emergency_send_failing_tracks_the_last_attempt);

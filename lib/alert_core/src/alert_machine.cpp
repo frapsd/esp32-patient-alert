@@ -80,6 +80,7 @@ void AlertMachine::restore(const PersistedState& s, uint32_t nowMs, uint32_t now
   confirmUnresolved_ = false;
   configError_ = false;
   emergencySendFailed_ = false;
+  lastRequestFailed_ = false;
   ackPending_ = false;
   ackDevice_[0] = '\0';
   lightCount_ = 0;
@@ -148,8 +149,9 @@ void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t pressMs, uint32
   const uint32_t pressAge = nowMs - pressMs;
 
   // Decide against the state as it was at the press, before expiring it at nowMs.
-  // A press stamped before the acknowledgement was made against an emergency
-  // that was still unacknowledged, and carried no new information then.
+  // A gesture stamped before the acknowledgement (a Tap at its press, a Hold at
+  // its threshold) was made against an emergency that was still
+  // unacknowledged, and carried no new information then.
   // The confirmed window itself does not change how a gesture reads: inside it
   // a Tap is still a light request and a Hold still an emergency. Forcing every
   // press to an emergency for ten minutes took the choice away from the patient,
@@ -209,6 +211,7 @@ void AlertMachine::onEmergencySent(const SendResponse& r, uint32_t nowMs) {
   HttpOutcome o = r.outcome;
   if (o == HttpOutcome::Ok && r.receipt[0] == '\0') o = HttpOutcome::Transient;
   emergencySendFailed_ = o != HttpOutcome::Ok;
+  lastRequestFailed_ = o != HttpOutcome::Ok;
   if (o == HttpOutcome::Ok) {
     configError_ = false;
     copyStr(receipt_, sizeof(receipt_), r.receipt);
@@ -223,6 +226,7 @@ void AlertMachine::onEmergencySent(const SendResponse& r, uint32_t nowMs) {
 void AlertMachine::onReceipt(const ReceiptStatus& r, uint32_t nowMs, uint32_t nowEpoch) {
   if (mode_ != Mode::EmergencyAwaitingAck) return;
   PersistedState before = persisted();
+  lastRequestFailed_ = r.outcome != HttpOutcome::Ok;
   switch (r.outcome) {
     case HttpOutcome::Ok:
       configError_ = false;
@@ -253,6 +257,7 @@ void AlertMachine::onReceipt(const ReceiptStatus& r, uint32_t nowMs, uint32_t no
 
 void AlertMachine::onLightSent(HttpOutcome o, uint32_t nowMs) {
   if (lightCount_ == 0) return;  // queue cleared by an emergency meanwhile
+  lastRequestFailed_ = o != HttpOutcome::Ok;
   if (o == HttpOutcome::Ok) {
     configError_ = false;
     for (size_t i = 1; i < lightCount_; i++) lightQueue_[i - 1] = lightQueue_[i];
@@ -267,6 +272,7 @@ void AlertMachine::onLightSent(HttpOutcome o, uint32_t nowMs) {
 
 void AlertMachine::onAckNoticeSent(HttpOutcome o, uint32_t nowMs) {
   if (!ackPending_) return;
+  lastRequestFailed_ = o != HttpOutcome::Ok;
   if (o == HttpOutcome::Ok) {
     configError_ = false;
     ackPending_ = false;

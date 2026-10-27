@@ -30,7 +30,7 @@
 - **Secure transport**: TLS to `api.pushover.net` with certificate verification against embedded root CAs; never disabled.
 - **Watchdog**: a 60 s watchdog restarts the board if the main loop or the button/LED task hangs.
 - **Buzzer cues**: every press, sent request, acknowledgement and live emergency also has a sound, for a patient who cannot see the LED.
-- **Tested logic**: pure C++ in `lib/alert_core`, 91 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
+- **Tested logic**: pure C++ in `lib/alert_core`, 110 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
 
 Principle: when in doubt, emergency. The one exception is the 10-minute "confirmed" window: there a gesture means what it always means, because a patient who cannot see the solid LED cannot know the window is open.
 
@@ -85,15 +85,15 @@ The buzzer repeats what the LED says, for a patient who cannot see it. Tones sta
 | Sound | Meaning |
 |---|---|
 | One high beep (0.3 s) as soon as the button goes down | Press registered |
-| One low beep (0.3 s) as soon as the button goes down | Press registered, but nothing can be sent now (offline or configuration error); a light request is queued |
-| Fast warble (about 0.8 s) after holding 2.5 s | Emergency armed, the button can be released |
+| One low beep (0.3 s) as soon as the button goes down | Press registered, but nothing can be sent now: offline, configuration error, or the last request failed (Wi-Fi up but no internet). Outside an emergency a tap is still queued as a light request |
+| Fast warble (about 0.8 s) after holding 2.5 s, or when the device processes a second press within 60 s (after any request already in progress) | Emergency armed, the button can be released |
 | Two beeps | Light request delivered to Pushover (also inside the confirmed window, where the LED stays solid) |
 | Rising three-note phrase, twice | Someone acknowledged the emergency |
 | Short warble, repeated | Emergency live and not yet acknowledged: every 5 s for the first 2 minutes, then every 30 s |
 | Two long low tones, repeated on the same schedule | Emergency live but **not getting out**: no Wi-Fi, a failed send (Wi-Fi up but no internet, Pushover unreachable), or Pushover rejects it |
 | Two long low tones, once | Configuration error outside an emergency |
 
-A press always sounds at once, cutting short any other cue; the other news waits until the buzzer is silent, and news cut short by a press plays again afterwards.
+A press always sounds at once, cutting short any other cue; the other news waits until the buzzer is silent, and news cut short by a press plays again afterwards, unless an emergency started in the meantime. Presses never delay the emergency reminder; during an emergency the press beep itself says whether it is getting out (high) or not (low).
 
 ## Hardware
 

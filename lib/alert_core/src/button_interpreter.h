@@ -14,6 +14,9 @@ class ButtonInterpreter {
   // Debounced level, for feedback that must fire at the press: a Tap is
   // only known at release, up to holdMs later.
   bool pressedStable() const { return stable_; }
+  // Accepted press edge of the current or last press: when it really happened,
+  // as opposed to when its gesture was emitted.
+  uint32_t pressStartMs() const { return acceptedPressMs_; }
 
  private:
   uint32_t debounceMs_;

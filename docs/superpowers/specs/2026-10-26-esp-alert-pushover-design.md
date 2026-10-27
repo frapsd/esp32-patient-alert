@@ -86,7 +86,7 @@ all'emergenza.
 | Pressione tenuta ≥ 1,5 s (2,5 s dal 2026-10-27) | Emergenza (scatta al raggiungimento della soglia, senza aspettare il rilascio) |
 | Una nuova pressione qualsiasi entro 60 s da una richiesta leggera | Emergenza (copre il "premo di nuovo perché non arriva nessuno" e le pressioni ripetute in preda al panico) |
 | Qualsiasi pressione mentre un'emergenza è attiva (non confermata) | Nessun nuovo allarme; il LED ribadisce lo stato |
-| Qualsiasi pressione durante la finestra "confermata" (LED fisso, "aiuto in arrivo") | **Rivisto il 2026-10-27:** vale come sempre (breve = leggera, lunga o seconda entro 60 s = emergenza). In origine era una nuova emergenza verso tutti; cambiato per decisione dell'utente, perché il paziente non vede il LED fisso e non può sapere che la finestra è aperta. Una pressione fatta prima della conferma ed elaborata dopo resta ignorata. |
+| Qualsiasi pressione durante la finestra "confermata" (LED fisso, "aiuto in arrivo") | **Rivisto il 2026-10-27:** vale come sempre (breve = leggera, lunga o seconda entro 60 s = emergenza). In origine era una nuova emergenza verso tutti; cambiato per decisione dell'utente, perché il paziente non vede il LED fisso e non può sapere che la finestra è aperta. Una pressione fatta prima della conferma ed elaborata dopo resta ignorata: per un tocco conta quando il bottone scende, per una pressione lunga quando scatta la soglia dei 2,5 s. |
 
 Le soglie (2,5 s e 60 s) sono costanti configurabili. Il debounce è a carico
 del builder.

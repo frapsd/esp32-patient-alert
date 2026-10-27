@@ -107,6 +107,17 @@ static void test_sparse_updates_long_press_is_hold() {
   TEST_ASSERT_TRUE(q[0].g == Gesture::Hold);
 }
 
+// The gesture is only known at release (Tap) or threshold (Hold); the
+// press itself happened at the accepted edge, which the caller stamps.
+static void test_press_start_is_the_accepted_edge() {
+  ButtonInterpreter b(30, 1500);
+  feed(b, false, 0, 100);
+  feed(b, true, 100, 800);  // accepted at 130
+  auto r = feed(b, false, 800, 900);
+  TEST_ASSERT_EQUAL(1, r.size());
+  TEST_ASSERT_EQUAL_UINT32(130, b.pressStartMs());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_tap_emits_on_release);
@@ -117,5 +128,6 @@ int main(int, char**) {
   RUN_TEST(test_wraparound_tap);
   RUN_TEST(test_two_taps_two_gestures);
   RUN_TEST(test_sparse_updates_long_press_is_hold);
+  RUN_TEST(test_press_start_is_the_accepted_edge);
   return UNITY_END();
 }

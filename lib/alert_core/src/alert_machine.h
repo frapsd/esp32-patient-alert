@@ -27,7 +27,7 @@ class AlertMachine {
  public:
   explicit AlertMachine(const MachineConfig&);
   // nowEpoch 0 = wall time unknown. A saved Confirmed state then resumes with
-  // a full window from nowMs (presses still mean emergency) until
+  // a full window from nowMs (gestures read as usual) until
   // onWallClock() can place the real window; NVS is left untouched meanwhile.
   void restore(const PersistedState&, uint32_t nowMs, uint32_t nowEpoch);
   // Call regularly with the current wall time (0 = unknown). Resolves a
@@ -48,11 +48,18 @@ class AlertMachine {
   LedPattern led(uint32_t nowMs, bool online) const;
   // Pushover rejected the last request; cleared by the next accepted one.
   bool configError() const { return configError_; }
+  // An emergency is being sent or awaits acknowledgement.
+  bool emergencyLive() const {
+    return mode_ == Mode::EmergencyPending || mode_ == Mode::EmergencyAwaitingAck;
+  }
   // An emergency is waiting to be sent and its last attempt failed (no
   // internet behind the Wi-Fi, Pushover down, TLS error...): nobody has it yet.
   bool emergencySendFailing() const {
     return mode_ == Mode::EmergencyPending && emergencySendFailed_;
   }
+  // The latest request of any kind (light, emergency, receipt, ack notice)
+  // failed; cleared by the next one that succeeds. Forgotten on restore.
+  bool lastRequestFailed() const { return lastRequestFailed_; }
   bool takeDirty();                       // true once after any change to the persisted fields
   PersistedState persisted() const;
 
@@ -81,6 +88,7 @@ class AlertMachine {
   bool dirty_ = false;
   bool configError_ = false;
   bool emergencySendFailed_ = false;  // last SendEmergency for this emergency failed
+  bool lastRequestFailed_ = false;
 
   Timer emergencyTimer_;  // send in EmergencyPending, poll in EmergencyAwaitingAck
 

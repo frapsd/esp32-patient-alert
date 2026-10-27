@@ -43,7 +43,6 @@ const ToneStep* cueSteps(Cue c, size_t& count) {
 
 void CuePlayer::start(Cue c, uint32_t nowMs) {
   steps_ = cueSteps(c, count_);
-  if (count_ == 0) steps_ = nullptr;
   index_ = 0;
   stepStartMs_ = nowMs;
 }
@@ -66,6 +65,7 @@ uint16_t CuePlayer::freqAt(uint32_t nowMs) {
 }
 
 CueDecision CueScheduler::decide(const CueInputs& in, uint32_t nowMs) {
+  const bool wasActive = reminderActive_;
   if (in.reminder == Cue::None) {
     reminderActive_ = false;
   } else if (!reminderActive_) {
@@ -75,9 +75,16 @@ CueDecision CueScheduler::decide(const CueInputs& in, uint32_t nowMs) {
 
   CueDecision d;
   bool news = false;
-  if (in.holdFired || in.pressEdge) {
+  if (in.emergencyRaised || in.holdFired) {
+    // A new emergency is the latest word: news it cuts short or that is still
+    // queued ("help is coming", "request sent") would contradict it.
+    replay_ = Cue::None;
+    d.start = Cue::EmergencyArmed;
+    d.dropPending = true;
+    news = true;  // the proof it started: replayed if a press cuts it
+  } else if (in.pressEdge) {
     if (!in.playerIdle && news_ != Cue::None) replay_ = news_;
-    d.start = in.holdFired ? Cue::EmergencyArmed : in.canSend ? Cue::Press : Cue::PressOffline;
+    d.start = in.canSend ? Cue::Press : Cue::PressOffline;
   } else if (!in.playerIdle) {
     // let the current cue finish
   } else if (replay_ != Cue::None) {
@@ -90,11 +97,38 @@ CueDecision CueScheduler::decide(const CueInputs& in, uint32_t nowMs) {
     news = true;
   } else if (reminderActive_) {
     const uint32_t interval = nowMs - reminderSinceMs_ < fastForMs_ ? fastMs_ : slowMs_;
-    if (nowMs - lastCueMs_ >= interval) d.start = in.reminder;
+    if (nowMs - lastReminderMs_ >= interval) d.start = in.reminder;
   }
   if (d.start != Cue::None) {
-    lastCueMs_ = nowMs;
     news_ = news ? d.start : Cue::None;
+    // Only the reminder itself, or a cue before or announcing the emergency,
+    // restarts the interval: presses during an emergency must not hold off the
+    // one cue that says whether it is getting out.
+    if (d.start == in.reminder || !wasActive || in.emergencyRaised) lastReminderMs_ = nowMs;
   }
   return d;
+}
+
+uint16_t CueEngine::tick(const CueInputs& in, uint32_t nowMs, CueDecision& d) {
+  player_.freqAt(nowMs);  // advance first: a cue that just ended reads idle
+  CueInputs now = in;
+  now.playerIdle = player_.idle();
+  d = scheduler_.decide(now, nowMs);
+  if (d.start != Cue::None) player_.start(d.start, nowMs);
+  return player_.freqAt(nowMs);
+}
+
+static_assert(static_cast<uint8_t>(Cue::EmergencyWaiting) < 8, "cueBit() packs cues in a uint8_t");
+
+uint8_t cueBit(Cue c) {
+  return c == Cue::None ? 0 : static_cast<uint8_t>(1u << static_cast<uint8_t>(c));
+}
+
+Cue firstPending(uint8_t mask) {
+  if (mask & cueBit(Cue::Confirmed)) return Cue::Confirmed;
+  if (mask & cueBit(Cue::Failed)) return Cue::Failed;
+  for (uint8_t i = 1; i < 8; i++) {
+    if (mask & (1u << i)) return static_cast<Cue>(i);
+  }
+  return Cue::None;
 }

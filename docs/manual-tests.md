@@ -22,6 +22,9 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
 - [ ] **3. Doppia pressione**
   - Passi: premere breve, poi di nuovo entro 60 s.
   - LED: dopo la prima, fisso 3 s; dopo la seconda, lampeggio veloce.
+  - Buzzer: bip a ogni pressione; dopo la seconda, il trillo veloce di emergenza armata
+    (appena finito l'invio della prima richiesta, se era ancora in corso). I due bip di
+    "richiesta consegnata" non devono suonare dopo il trillo.
   - Telefoni: prima la notifica normale, poi l'emergenza. Ripetere aspettando più di 60 s tra
     le due pressioni: la seconda deve valere come nuova richiesta leggera.
 - [ ] **4. Conferma dal telefono**
@@ -56,7 +59,8 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
     connessione Wi-Fi ogni 60 s) arriva l'emergenza.
   - Variante internet: lasciare acceso il Wi-Fi ma staccare il cavo internet del router, poi
     premere a lungo. Buzzer: dopo il primo invio fallito, i due toni gravi al posto dei trilli
-    di attesa; ricollegando il cavo, all'invio riuscito tornano i trilli.
+    di attesa, e ogni pressione dà il bip grave; ricollegando il cavo, all'invio riuscito
+    tornano i trilli. Premendo di continuo, ogni pressione dà il bip grave.
   - Variante: spegnere la rete e fare una pressione breve; al ritorno arriva la richiesta con
     "Richiesta delle HH:MM" con l'ora della pressione.
 - [ ] **8. Riavvio durante un'emergenza**
@@ -98,5 +102,5 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
 - [ ] **11. Richiamo lungo durante un'emergenza**
   - Passi: fare un'emergenza e non confermarla per almeno 3 minuti.
   - Buzzer: un trillo breve ogni 5 s per i primi 2 minuti, poi uno ogni 30 s. Una pressione
-    durante l'attesa non deve sovrapporsi a un trillo: suona il bip e il trillo successivo
-    arriva dopo una pausa.
+    durante l'attesa suona il bip ma non sposta il trillo successivo, che arriva sempre ogni
+    5 s (aspettando solo la fine del bip).

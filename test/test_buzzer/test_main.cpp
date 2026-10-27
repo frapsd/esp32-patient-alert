@@ -119,7 +119,11 @@ static void test_wraparound() {
 // Reminder every 5 s for the first 120 s of an emergency, then every 30 s.
 static CueScheduler scheduler() { return CueScheduler(5000, 120000, 30000); }
 
-static CueInputs quiet() { return CueInputs{}; }
+static CueInputs quiet() {
+  CueInputs in;
+  in.canSend = true;
+  return in;
+}
 
 static void test_press_cue_says_whether_it_can_be_sent() {
   CueScheduler s = scheduler();
@@ -203,7 +207,7 @@ static void test_cut_reminder_is_not_replayed() {
   TEST_ASSERT_TRUE(s.decide(in, 15200).start == Cue::EmergencyWaiting);
 }
 
-static void test_reminder_waits_a_quiet_interval_after_any_cue() {
+static void test_reminder_waits_a_quiet_interval_after_the_armed_cue() {
   CueScheduler s = scheduler();
   CueInputs in = quiet();
   in.holdFired = true;
@@ -272,6 +276,141 @@ static void test_scheduler_wraparound() {
   TEST_ASSERT_TRUE(s.decide(in, (uint32_t)(t + 5000)).start == Cue::EmergencyWaiting);
 }
 
+// Pressing during an emergency must not push the reminder back: it is the only
+// thing that says whether the emergency is getting out.
+static void test_presses_do_not_postpone_the_reminder() {
+  CueScheduler s = scheduler();
+  CueInputs in = quiet();
+  in.reminder = Cue::Failed;
+  TEST_ASSERT_TRUE(s.decide(in, 10000).start == Cue::Failed);
+  for (uint32_t t = 11000; t < 15000; t += 1000) {
+    in.pressEdge = true;
+    TEST_ASSERT_TRUE(s.decide(in, t).start == Cue::Press);
+    in.pressEdge = false;
+    TEST_ASSERT_TRUE(s.decide(in, t + 10).start == Cue::None);  // the press beep
+  }
+  TEST_ASSERT_TRUE(s.decide(in, 15000).start == Cue::Failed);
+}
+
+// A Hold announces an emergency: whatever news it cut is no longer the latest
+// word and must not play right after the "armed" warble.
+static void test_news_cut_by_a_hold_is_not_replayed() {
+  CueScheduler s = scheduler();
+  CueInputs in = quiet();
+  in.pending = Cue::Confirmed;
+  TEST_ASSERT_TRUE(s.decide(in, 1000).start == Cue::Confirmed);
+  in = quiet();
+  in.playerIdle = false;
+  in.holdFired = true;
+  TEST_ASSERT_TRUE(s.decide(in, 1500).start == Cue::EmergencyArmed);
+  in = quiet();
+  TEST_ASSERT_TRUE(s.decide(in, 2400).start == Cue::None);
+}
+
+// An emergency raised without a Hold (a second tap within 60 s) is announced
+// as soon as the loop reports it, cutting whatever is sounding; the reminder
+// then waits its interval.
+static void test_emergency_without_a_hold_is_announced() {
+  CueScheduler s = scheduler();
+  CueInputs in = quiet();
+  in.pressEdge = true;
+  TEST_ASSERT_TRUE(s.decide(in, 1000).start == Cue::Press);
+  in = quiet();
+  in.playerIdle = false;
+  in.reminder = Cue::EmergencyWaiting;
+  in.emergencyRaised = true;
+  TEST_ASSERT_TRUE(s.decide(in, 1100).start == Cue::EmergencyArmed);
+  in.emergencyRaised = false;
+  in.playerIdle = true;
+  TEST_ASSERT_TRUE(s.decide(in, 2000).start == Cue::None);
+  TEST_ASSERT_TRUE(s.decide(in, 6100).start == Cue::EmergencyWaiting);
+}
+
+// News a press cut short is dropped once an emergency starts: "help is coming"
+// or "request sent" would contradict it.
+static void test_emergency_start_drops_news_waiting_to_replay() {
+  CueScheduler s = scheduler();
+  CueInputs in = quiet();
+  in.pending = Cue::LightSent;
+  TEST_ASSERT_TRUE(s.decide(in, 1000).start == Cue::LightSent);
+  in = quiet();
+  in.playerIdle = false;
+  in.pressEdge = true;
+  TEST_ASSERT_TRUE(s.decide(in, 1100).start == Cue::Press);
+  in = quiet();
+  in.playerIdle = false;
+  in.reminder = Cue::EmergencyWaiting;
+  in.emergencyRaised = true;  // the second tap upgraded
+  TEST_ASSERT_TRUE(s.decide(in, 1200).start == Cue::EmergencyArmed);
+  in.emergencyRaised = false;
+  in.playerIdle = true;
+  TEST_ASSERT_TRUE(s.decide(in, 2000).start == Cue::None);
+}
+
+// News still queued when an emergency starts is stale too: "help is coming"
+// must not follow "emergency armed".
+static void test_emergency_start_drops_queued_news() {
+  CueScheduler s = scheduler();
+  CueInputs in = quiet();
+  in.playerIdle = false;
+  in.pending = Cue::Confirmed;
+  in.holdFired = true;
+  CueDecision d = s.decide(in, 1000);
+  TEST_ASSERT_TRUE(d.start == Cue::EmergencyArmed);
+  TEST_ASSERT_TRUE(d.dropPending);
+  in = quiet();
+  in.pressEdge = true;
+  TEST_ASSERT_FALSE(s.decide(in, 3000).dropPending);
+}
+
+// The "armed" warble is the one proof the emergency started: a press that cuts
+// it short gets it played again.
+static void test_armed_cue_cut_by_a_press_plays_again() {
+  CueScheduler s = scheduler();
+  CueInputs in = quiet();
+  in.emergencyRaised = true;
+  in.reminder = Cue::EmergencyWaiting;
+  TEST_ASSERT_TRUE(s.decide(in, 1000).start == Cue::EmergencyArmed);
+  in.emergencyRaised = false;
+  in.playerIdle = false;
+  in.pressEdge = true;
+  TEST_ASSERT_TRUE(s.decide(in, 1100).start == Cue::Press);
+  in.pressEdge = false;
+  in.playerIdle = true;
+  TEST_ASSERT_TRUE(s.decide(in, 1400).start == Cue::EmergencyArmed);
+}
+
+// The engine sees the player's state after advancing it: a press on the first
+// tick after a melody ended must not replay the finished melody.
+static void test_engine_does_not_replay_news_that_just_ended() {
+  CueEngine e(5000, 120000, 30000);
+  CueInputs in = quiet();
+  in.pending = Cue::Confirmed;
+  CueDecision taken;
+  TEST_ASSERT_EQUAL_UINT16(1000, e.tick(in, 0, taken));
+  TEST_ASSERT_TRUE(taken.pendingTaken);
+  in = quiet();
+  TEST_ASSERT_EQUAL_UINT16(1700, e.tick(in, 1500, taken));  // last step, ends at 1680
+  in.pressEdge = true;
+  TEST_ASSERT_EQUAL_UINT16(1500, e.tick(in, 1690, taken));  // Press
+  in.pressEdge = false;
+  TEST_ASSERT_EQUAL_UINT16(0, e.tick(in, 1990, taken));
+  TEST_ASSERT_EQUAL_UINT16(0, e.tick(in, 2000, taken));  // nothing replayed
+}
+
+// Several news cues posted while the buzzer is busy are all kept, the most
+// important first.
+static void test_pending_news_is_kept_and_ordered() {
+  uint8_t mask = 0;
+  mask |= cueBit(Cue::LightSent);
+  mask |= cueBit(Cue::Confirmed);
+  TEST_ASSERT_TRUE(firstPending(mask) == Cue::Confirmed);
+  mask &= static_cast<uint8_t>(~cueBit(Cue::Confirmed));
+  TEST_ASSERT_TRUE(firstPending(mask) == Cue::LightSent);
+  mask &= static_cast<uint8_t>(~cueBit(Cue::LightSent));
+  TEST_ASSERT_TRUE(firstPending(mask) == Cue::None);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_none_is_silent);
@@ -291,10 +430,18 @@ int main(int, char**) {
   RUN_TEST(test_news_cut_by_a_press_plays_again);
   RUN_TEST(test_finished_news_is_not_replayed);
   RUN_TEST(test_cut_reminder_is_not_replayed);
-  RUN_TEST(test_reminder_waits_a_quiet_interval_after_any_cue);
+  RUN_TEST(test_reminder_waits_a_quiet_interval_after_the_armed_cue);
   RUN_TEST(test_reminder_never_cuts_a_cue);
   RUN_TEST(test_reminder_slows_down_after_two_minutes);
   RUN_TEST(test_reminder_speeds_up_again_for_a_new_emergency);
   RUN_TEST(test_scheduler_wraparound);
+  RUN_TEST(test_presses_do_not_postpone_the_reminder);
+  RUN_TEST(test_news_cut_by_a_hold_is_not_replayed);
+  RUN_TEST(test_emergency_without_a_hold_is_announced);
+  RUN_TEST(test_emergency_start_drops_news_waiting_to_replay);
+  RUN_TEST(test_engine_does_not_replay_news_that_just_ended);
+  RUN_TEST(test_emergency_start_drops_queued_news);
+  RUN_TEST(test_armed_cue_cut_by_a_press_plays_again);
+  RUN_TEST(test_pending_news_is_kept_and_ordered);
   return UNITY_END();
 }

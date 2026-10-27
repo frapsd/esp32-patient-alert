@@ -2,28 +2,31 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "alert_types.h"
+#include "audio_policy.h"
 #include "buzzer_cue.h"
 
 // Button + LED task, pinned to core 0 so both keep working while the loop task
 // (core 1) is blocked in an HTTPS request. Gestures go to `gestureQueue`
-// (item type GestureEvent), stamped when the interpreter emits them so the
-// loop can process them late; a full queue drops the gesture and logs it.
-// A Tap is emitted (and stamped) at release, up to kHoldMs after the actual
-// press; a Hold at the hold threshold. The late Tap stamp only makes the 60 s
-// upgrade and the confirmed window look slightly later, so both err toward
-// an emergency. The task is subscribed to the task watchdog (initialised by
+// (item type GestureEvent), stamped so the loop can process them late: a Tap
+// with its accepted press edge (it is only emitted at release), a Hold with its
+// threshold. Both match the spec (the 60 s upgrade counts press to press) and
+// let a gesture made before an acknowledgement be told apart from one made
+// after it. A full queue drops the gesture and logs it; a Hold drops the
+// oldest gesture instead, since the patient has already heard it armed. The task is subscribed to the task watchdog (initialised by
 // setup() before ioStart()), so a stuck io task reboots the board too.
 struct GestureEvent {
   Gesture g;
-  uint32_t pressMs;     // millis() when emitted: Tap at release, Hold at threshold
+  uint32_t pressMs;     // millis(): Tap at the press edge, Hold at the threshold
   uint32_t pressEpoch;  // netWallEpoch() at the same moment, 0 = wall time unknown
 };
 
 void ioStart(QueueHandle_t gestureQueue);
 void ioSetPattern(LedPattern);
-// Queues one cue for the buzzer; callable from the loop task. It plays once the
-// buzzer is silent. Only the latest unplayed cue is kept.
+// Queues one news cue for the buzzer; callable from the loop task. It plays
+// once the buzzer is silent. Different cues queued meanwhile are all kept.
 void ioPlayCue(Cue);
-// canSend picks the press cue (Press or PressOffline). reminder is repeated
-// while an emergency is live, Cue::None otherwise.
-void ioSetAudioState(bool canSend, Cue reminder);
+// The loop raised an emergency without a Hold (the upgrade rule): the buzzer
+// announces it at once. A Hold is announced by the io task itself.
+void ioEmergencyRaised();
+// Published by the loop task after every change; see audioState().
+void ioSetAudioState(const AudioState&);

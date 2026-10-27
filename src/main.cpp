@@ -3,6 +3,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "alert_machine.h"
+#include "audio_policy.h"
 #include "config.h"
 #include "io_task.h"
 #include "net.h"
@@ -64,6 +65,26 @@ void logModeChange() {
     if (m == Mode::Confirmed) ioPlayCue(Cue::Confirmed);
     lastMode = m;
   }
+}
+
+// Hands the LED and the buzzer the current state. Called right after gestures
+// too, not only at the end of loop(): the send that follows can block for
+// tens of seconds, and a new emergency must not stay silent meanwhile.
+void publishIo() {
+  LedPattern led = machine.led(millis(), netOnline());
+  if (led != lastLed) {
+    Serial.printf("[alert] led %s -> %s\n", ledName(lastLed), ledName(led));
+    lastLed = led;
+  }
+  ioSetPattern(led);
+
+  // The patient may not see the LED, so the buzzer carries the same news.
+  const AudioState audio = audioState(machine, netOnline());
+  const bool configError = machine.configError();
+  // A configuration error outside an emergency sounds once, when it appears.
+  if (configError && !lastConfigError && audio.reminder == Cue::None) ioPlayCue(Cue::Failed);
+  lastConfigError = configError;
+  ioSetAudioState(audio);
 }
 
 // Saves the persisted state when it changed. takeDirty() clears the flag, so a
@@ -155,13 +176,18 @@ void loop() {
     uint32_t now = millis();
     Serial.printf("[alert] gesture %s (pressed %ums ago)\n", ev.g == Gesture::Hold ? "Hold" : "Tap",
                   (unsigned)(now - ev.pressMs));
+    const bool wasEmergency = machine.emergencyLive();
     machine.onGesture(ev.g, now, ev.pressMs, ev.pressEpoch);
+    // A Hold already played the "armed" warble at the threshold; an emergency
+    // from the upgrade rule has not been announced yet.
+    if (!wasEmergency && machine.emergencyLive() && ev.g != Gesture::Hold) ioEmergencyRaised();
     logModeChange();
   }
   // Spec: the emergency is in NVS before it is sent, so a power cut during the
   // (blocking, up to tens of seconds) send cannot lose it. If this save fails
   // the send still goes ahead; persistIfDirty() keeps retrying every loop.
   persistIfDirty();
+  publishIo();
 
   netMaintain();
   machine.onWallClock(millis(), netWallEpoch());  // settles a Confirmed restored without time
@@ -177,34 +203,7 @@ void loop() {
     logModeChange();
   }
   persistIfDirty();
-
-  LedPattern led = machine.led(millis(), netOnline());
-  if (led != lastLed) {
-    Serial.printf("[alert] led %s -> %s\n", ledName(lastLed), ledName(led));
-    lastLed = led;
-  }
-  ioSetPattern(led);
-
-  // The patient may not see the LED, so the buzzer carries the same news.
-  // While an emergency is live the reminder says whether it is getting out: a
-  // pending one offline or rejected would otherwise sound like help is coming.
-  // Once Pushover holds a receipt it keeps alerting the phones on its own.
-  const Mode mode = machine.mode();
-  const bool online = netOnline();
-  const bool configError = machine.configError();
-  Cue reminder = Cue::None;
-  if (mode == Mode::EmergencyAwaitingAck) {
-    reminder = Cue::EmergencyWaiting;
-  } else if (mode == Mode::EmergencyPending) {
-    // netOnline() only means Wi-Fi and a valid clock: the internet behind the
-    // router can still be down, which only a failed send reveals.
-    const bool gettingOut = online && !configError && !machine.emergencySendFailing();
-    reminder = gettingOut ? Cue::EmergencyWaiting : Cue::Failed;
-  }
-  // A configuration error outside an emergency sounds once, when it appears.
-  if (configError && !lastConfigError && reminder == Cue::None) ioPlayCue(Cue::Failed);
-  lastConfigError = configError;
-  ioSetAudioState(online && !configError, reminder);
+  publishIo();
 
   delay(kLoopDelayMs);
 }

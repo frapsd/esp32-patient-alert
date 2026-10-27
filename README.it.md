@@ -80,8 +80,8 @@ legato all'età.
 | Suono | Significato |
 |---|---|
 | Un bip acuto (0,3 s) appena si preme | Pressione ricevuta |
-| Un bip grave (0,3 s) appena si preme | Pressione ricevuta, ma ora non si può inviare (offline o errore di configurazione); la richiesta leggera resta in coda |
-| Trillo veloce (circa 0,8 s) dopo 2,5 s di pressione | Emergenza armata, si può lasciare il bottone |
+| Un bip grave (0,3 s) appena si preme | Pressione ricevuta, ma ora non si può inviare: offline, errore di configurazione, o l'ultimo invio è fallito (Wi-Fi su ma niente internet). Fuori da un'emergenza il tocco resta comunque in coda come richiesta leggera |
+| Trillo veloce (circa 0,8 s) dopo 2,5 s di pressione, oppure quando il dispositivo elabora una seconda pressione entro 60 s (dopo l'eventuale invio già in corso) | Emergenza armata, si può lasciare il bottone |
 | Due bip | Richiesta leggera consegnata a Pushover (anche durante la finestra "confermata", quando il LED resta fisso) |
 | Tre note che salgono, due volte | Qualcuno ha confermato l'emergenza |
 | Trillo breve, ripetuto | Emergenza attiva e non ancora confermata: ogni 5 s per i primi 2 minuti, poi ogni 30 s |
@@ -90,7 +90,9 @@ legato all'età.
 
 Una pressione suona sempre subito, interrompendo qualsiasi altro suono; gli altri avvisi
 aspettano che il buzzer sia in silenzio, e un avviso interrotto da una pressione viene
-ripetuto subito dopo.
+ripetuto subito dopo, a meno che nel frattempo sia partita un'emergenza. Le pressioni non
+ritardano mai il richiamo dell'emergenza; durante un'emergenza è il bip stesso della pressione
+a dire se esce (acuto) o no (grave).
 
 ## Configurare Pushover
 
