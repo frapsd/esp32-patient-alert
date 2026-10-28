@@ -76,7 +76,8 @@ visibile la finestra.
    sull'ESP32 e non si usa.
    Non previsti dal piano (restano legati al ciclo, come oggi): cambi di rete, errori
    di configurazione, nuove pressioni. L'inizio della finestra compare quando il ciclo
-   elabora il tocco; se il ciclo è bloccato in quel momento compare a richiesta finita,
+   elabora il tocco; se il ciclo è bloccato in quel momento compare a richiesta finita
+   (e dura solo quanto resta dei 60 s dalla pressione),
    mentre la decisione "seconda pressione = emergenza" usa l'istante della pressione e
    resta corretta.
 4. **Scadenze aggiornate a ogni giro del ciclo.** Oggi gli stati a tempo si chiudono

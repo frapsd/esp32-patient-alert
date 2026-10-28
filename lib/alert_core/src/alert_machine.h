@@ -29,7 +29,9 @@ class AlertMachine {
   explicit AlertMachine(const MachineConfig&);
   // nowEpoch 0 = wall time unknown. A saved Confirmed state then resumes with
   // a full window from nowMs (gestures read as usual) until
-  // onWallClock() can place the real window; NVS is left untouched meanwhile.
+  // onWallClock() can place the real window; NVS is left untouched meanwhile,
+  // unless that full window runs out first (tick() then ends it, which is safe:
+  // at least as long has passed since the acknowledgement).
   void restore(const PersistedState&, uint32_t nowMs, uint32_t nowEpoch);
   // Call regularly with the current wall time (0 = unknown). Resolves a
   // Confirmed window restored without wall time: keeps only its real remaining

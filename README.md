@@ -30,7 +30,7 @@
 - **Secure transport**: TLS to `api.pushover.net` with certificate verification against embedded root CAs; never disabled.
 - **Watchdog**: a 60 s watchdog restarts the board if the main loop or the button/LED task hangs.
 - **Buzzer cues**: every press, sent request, acknowledgement and live emergency also has a sound, for a patient who cannot see the LED.
-- **Tested logic**: pure C++ in `lib/alert_core`, 127 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
+- **Tested logic**: pure C++ in `lib/alert_core`, 128 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
 
 Principle: when in doubt, emergency. The one exception is the 3-minute "confirmed" window: there a gesture means what it always means, because a patient who cannot see the solid LED cannot know the window is open.
 
@@ -79,7 +79,7 @@ Until the emergency is acknowledged, Pushover repeats it every 30 s and the LED 
 
 When several conditions hold at once, the first in this list wins: active emergency, the "press again" window (medium blink, 60 s from the short press, also inside the confirmed window or offline: for that minute it is what the patient can act on), confirmed emergency (within the 3-minute window), configuration error, offline, "light request sent" (3 s), idle. "Request sent" (3 s) and "confirmed" (3 min) are both solid and are told apart by duration.
 
-Timed changes (the end of the window, of "sent", of "confirmed") are carried out by the LED task, so they happen on time even while the main loop is blocked in a request. The start of the window appears when the loop processes the tap: if a request is in progress then, the medium blink starts when it ends. Whether a second press is an emergency is still decided from the moment of the press.
+Timed changes (the end of the window, of "sent", of "confirmed") are carried out by the LED task, so they happen on time even while the main loop is blocked in a request. The start of the window appears when the loop processes the tap: if a request is in progress then, the medium blink starts when it ends and lasts only for what is left of the 60 s from the press (not at all if the request ended later than that). Whether a second press is an emergency is still decided from the moment of the press.
 
 ## Buzzer cues
 
@@ -90,7 +90,7 @@ The buzzer carries the LED's news, for a patient who cannot see it; only the "pr
 | One high beep (0.3 s) as soon as the button goes down | Press registered |
 | One low beep (0.3 s) as soon as the button goes down | Press registered, but nothing can be sent now: offline, configuration error, or the last request failed (Wi-Fi up but no internet). Outside an emergency a tap is still queued as a light request |
 | Fast warble (about 0.8 s) after holding 2.5 s, or when the device processes a second press within 60 s (after any request already in progress) | Emergency armed, the button can be released |
-| Two beeps | Light request delivered to Pushover (also inside the confirmed window, where the LED stays solid) |
+| Two beeps | Light request delivered to Pushover (also inside the "press again" window or the confirmed window, where the LED does not show the 3 s solid) |
 | Rising three-note phrase, twice | Someone acknowledged the emergency |
 | Short warble, repeated | Emergency live and not yet acknowledged: every 5 s for the first 2 minutes, then every 30 s |
 | Two long low tones, repeated on the same schedule | Emergency live but **not getting out**: no Wi-Fi, a failed send (Wi-Fi up but no internet, Pushover unreachable), or Pushover rejects it |
@@ -171,7 +171,7 @@ Then work through [docs/manual-tests.md](docs/manual-tests.md).
 ## Roadmap
 
 - Heartbeat to healthchecks.io with a Pushover alert if the device goes silent (today an off or offline device alerts nobody).
-- Show the configuration error LED during an emergency too (today the fast emergency blink takes precedence; only the buzzer tells the patient that alerts are not going out).
+- Show the configuration error LED during an emergency too (today the fast emergency blink, and for 60 s after a tap the "press again" blink, take precedence; only the buzzer tells the patient that alerts are not going out).
 - Immediate LED feedback on a long press even while another network request is in progress (today the fast blink starts when the main loop processes the gesture, up to a few tens of seconds later; the buzzer already sounds at once).
 - An LED signal for a light request still queued (not sent) after the 60 s "press again" window.
 - Escalation by phone call (SIM module).

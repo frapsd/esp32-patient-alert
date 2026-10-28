@@ -865,6 +865,18 @@ static void test_led_plan_four_steps() {
   assertPlan(m.ledPlan(608000, true), 608000, 4, pat, off);
 }
 
+static void test_led_plan_offline_and_config_error_after_window() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  const LedPattern off1[] = {LedPattern::UpgradeWindow, LedPattern::Offline};
+  const uint32_t at[] = {0, 60000};
+  assertPlan(m.ledPlan(0, false), 0, 2, off1, at);
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 0));
+  m.onLightSent(HttpOutcome::Rejected, 0);
+  const LedPattern err[] = {LedPattern::UpgradeWindow, LedPattern::ConfigError};
+  assertPlan(m.ledPlan(0, true), 0, 2, err, at);
+}
+
 static void test_led_plan_emergency_single_step() {
   AlertMachine m(kCfg);
   m.onGesture(Gesture::Hold, 0, 0, kEpoch);
@@ -920,5 +932,6 @@ int main(int, char**) {
   RUN_TEST(test_led_plan_light_sent_after_window);
   RUN_TEST(test_led_plan_four_steps);
   RUN_TEST(test_led_plan_emergency_single_step);
+  RUN_TEST(test_led_plan_offline_and_config_error_after_window);
   return UNITY_END();
 }

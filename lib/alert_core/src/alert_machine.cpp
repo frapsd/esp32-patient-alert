@@ -164,7 +164,7 @@ void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t pressMs, uint32
   // unacknowledged, and carried no new information then.
   // The confirmed window itself does not change how a gesture reads: inside it
   // a Tap is still a light request and a Hold still an emergency. Forcing every
-  // press to an emergency for ten minutes took the choice away from the patient,
+  // press to an emergency for the whole window took the choice away from the patient,
   // who cannot see the LED that says the window is open.
   bool pressedBeforeConfirm = false;
   if (mode_ == Mode::Confirmed && !confirmUnresolved_) {

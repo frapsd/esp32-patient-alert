@@ -77,7 +77,8 @@ dalla durata.
 I cambi a tempo (fine della finestra, di "inviata", di "confermata") li esegue il task del
 LED: avvengono all'istante giusto anche mentre il ciclo principale è bloccato in un invio.
 L'inizio della finestra invece compare quando il ciclo elabora il tocco: se in quel momento
-è in corso un invio, il lampeggio medio parte a invio finito. La decisione "seconda
+è in corso un invio, il lampeggio medio parte a invio finito e dura solo quanto resta dei
+60 s dalla pressione (niente, se l'invio è finito dopo). La decisione "seconda
 pressione = emergenza" usa comunque l'istante della pressione.
 
 ## Cosa dice il buzzer
@@ -92,7 +93,7 @@ legato all'età.
 | Un bip acuto (0,3 s) appena si preme | Pressione ricevuta |
 | Un bip grave (0,3 s) appena si preme | Pressione ricevuta, ma ora non si può inviare: offline, errore di configurazione, o l'ultimo invio è fallito (Wi-Fi su ma niente internet). Fuori da un'emergenza il tocco resta comunque in coda come richiesta leggera |
 | Trillo veloce (circa 0,8 s) dopo 2,5 s di pressione, oppure quando il dispositivo elabora una seconda pressione entro 60 s (dopo l'eventuale invio già in corso) | Emergenza armata, si può lasciare il bottone |
-| Due bip | Richiesta leggera consegnata a Pushover (anche durante la finestra "confermata", quando il LED resta fisso) |
+| Due bip | Richiesta leggera consegnata a Pushover (anche durante la finestra "premi ancora" o "confermata", quando il LED non mostra il fisso di 3 s) |
 | Tre note che salgono, due volte | Qualcuno ha confermato l'emergenza |
 | Trillo breve, ripetuto | Emergenza attiva e non ancora confermata: ogni 5 s per i primi 2 minuti, poi ogni 30 s |
 | Due toni gravi lunghi, ripetuti con lo stesso ritmo | Emergenza attiva ma **che non esce**: niente Wi-Fi, un invio fallito (Wi-Fi su ma internet giù, Pushover irraggiungibile), oppure Pushover la rifiuta |
@@ -230,7 +231,7 @@ evitare.
 - Heartbeat verso healthchecks.io con avviso Pushover se il dispositivo smette di farsi
   sentire (oggi un dispositivo spento o offline non avvisa nessuno).
 - Segnalare l'errore di configurazione anche col LED durante un'emergenza: oggi il lampeggio
-  veloce dell'emergenza ha la precedenza, e solo il buzzer dice al paziente che gli avvisi non
+  veloce dell'emergenza, e per 60 s dopo un tocco il lampeggio medio, hanno la precedenza, e solo il buzzer dice al paziente che gli avvisi non
   escono.
 - LED immediato alla pressione lunga anche mentre è in corso un'altra richiesta di rete (oggi
   il lampeggio veloce parte quando il ciclo principale elabora il gesto, fino a qualche

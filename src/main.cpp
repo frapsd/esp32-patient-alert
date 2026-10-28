@@ -130,8 +130,8 @@ void execute(const Command& cmd) {
       HttpOutcome o = parseSendResponse(r.code, r.body.c_str()).outcome;
       Serial.printf("[alert] light request sent: HTTP %d %s\n", r.code, outcomeName(o));
       machine.onLightSent(o, millis());
-      // From the outcome, not the LED: inside the confirmed window the solid
-      // LED hides LightSent, but the patient still needs to hear it went out.
+      // From the outcome, not the LED: inside the upgrade or confirmed window
+      // the LED hides LightSent, but the patient still needs to hear it went out.
       if (o == HttpOutcome::Ok) ioPlayCue(Cue::LightSent);
       return;
     }
