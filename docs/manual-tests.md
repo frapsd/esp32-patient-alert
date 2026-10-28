@@ -70,7 +70,8 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
     tornano i trilli. Premendo di continuo, ogni pressione dà il bip grave.
   - Variante silenzio: con il Wi-Fi spento e l'emergenza da più di 30 s, pressione lunga:
     due note che scendono, poi silenzio (LED sempre a lampeggio veloce). Riaccendere la rete:
-    l'emergenza parte, nessun suono di richiamo.
+    l'emergenza parte, nessun suono di richiamo (se il primo invio dopo il ritorno della
+    rete fallisce, i due toni gravi suonano una volta: è voluto).
   - Variante: spegnere la rete e fare una pressione breve; al ritorno arriva la richiesta con
     "Richiesta delle HH:MM" con l'ora della pressione.
 - [ ] **8. Riavvio durante un'emergenza**

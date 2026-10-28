@@ -113,6 +113,7 @@ class CueScheduler {
   bool muted_ = false;
   bool worseNews_ = false;   // muted and the emergency stopped getting out: say it once
   bool worseToldThisMute_ = false;
+  bool confirmedSeen_ = false;  // "confirmed" was posted for this emergency
   bool pressSawEmergency_ = false;  // at the last press edge, this emergency was live
   uint8_t pressSerial_ = 0;
 };

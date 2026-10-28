@@ -117,7 +117,8 @@ static void test_wraparound() {
   TEST_ASSERT_EQUAL_UINT16(0, p.freqAt((uint32_t)(t + 300)));
 }
 
-// Reminder every 5 s for the first 120 s of an emergency, then every 30 s.
+// Reminder every 5 s for the first 120 s of an emergency, every 30 s up to 600 s,
+// then every 120 s; a hold mutes only after 30 s.
 static CueScheduler scheduler() { return CueScheduler(5000, 120000, 30000, 600000, 120000, 30000); }
 
 static CueInputs quiet() {
@@ -522,7 +523,6 @@ static void test_hold_while_confirmed_playing_is_armed() {
   TEST_ASSERT_TRUE(holdAt(s, in, 42500).start == Cue::EmergencyArmed);
 }
 
-// A new emergency is never inherited muted, even without a silent tick between.
 // The confirmation cut short by the press that starts the hold, waiting to be
 // replayed: the emergency is over, so the hold is not a mute.
 static void test_hold_while_confirmed_waits_for_replay_is_armed() {
@@ -537,6 +537,51 @@ static void test_hold_while_confirmed_waits_for_replay_is_armed() {
   TEST_ASSERT_TRUE(holdAt(s, in, 43600).start == Cue::EmergencyArmed);
 }
 
+// The loop may post "confirmed" well before it stops publishing the reminder
+// (it saves the state to NVS in between): once heard, the emergency is over
+// for a hold, even after the melody ended.
+static void test_hold_after_confirmed_played_is_armed() {
+  CueScheduler s = scheduler();
+  run(s, live(), 0, 40000);
+  CueInputs in = live();
+  in.pending = Cue::Confirmed;
+  TEST_ASSERT_TRUE(s.decide(in, 41000).start == Cue::Confirmed);
+  run(s, live(), 41100, 44000);  // melody over, reminder still published
+  pressAt(s, live(), 44000);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 46500).start == Cue::EmergencyArmed);
+}
+
+static void test_muted_while_failing_stays_silent() {
+  CueScheduler s = scheduler();
+  run(s, live(Cue::Failed), 0, 40000);
+  pressAt(s, live(Cue::Failed), 40000);
+  TEST_ASSERT_TRUE(holdAt(s, live(Cue::Failed), 42500).start == Cue::Muted);
+  TEST_ASSERT_EQUAL(0, run(s, live(Cue::Failed), 42600, 200000).size());
+}
+
+// Each mute gets its own "worse" warning.
+static void test_unmute_rearms_worse_news() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  TEST_ASSERT_TRUE(s.decide(live(Cue::Failed), 50000).start == Cue::Failed);
+  s.decide(live(), 51000);
+  pressAt(s, live(), 52000);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 54500).start == Cue::EmergencyWaiting);  // unmuted
+  pressAt(s, live(), 55000);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 57500).start == Cue::Muted);
+  TEST_ASSERT_TRUE(s.decide(live(Cue::Failed), 60000).start == Cue::Failed);
+}
+
+static void test_grace_boundary() {
+  CueScheduler s = scheduler();
+  s.decide(live(), 0);
+  pressAt(s, live(), 27499);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 29999).start == Cue::EmergencyArmed);
+  pressAt(s, live(), 27500);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 30000).start == Cue::Muted);
+}
+
+// A new emergency is never inherited muted, even without a silent tick between.
 static void test_new_serial_clears_mute() {
   CueScheduler s = scheduler();
   muteAt42500(s);
@@ -659,6 +704,10 @@ int main(int, char**) {
   RUN_TEST(test_hold_while_confirmed_queued_is_armed);
   RUN_TEST(test_hold_while_confirmed_playing_is_armed);
   RUN_TEST(test_hold_while_confirmed_waits_for_replay_is_armed);
+  RUN_TEST(test_hold_after_confirmed_played_is_armed);
+  RUN_TEST(test_muted_while_failing_stays_silent);
+  RUN_TEST(test_unmute_rearms_worse_news);
+  RUN_TEST(test_grace_boundary);
   RUN_TEST(test_new_serial_clears_mute);
   RUN_TEST(test_end_of_emergency_clears_mute);
   RUN_TEST(test_muted_worse_news_once);

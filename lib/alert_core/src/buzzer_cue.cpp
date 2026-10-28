@@ -80,6 +80,7 @@ CueDecision CueScheduler::decide(const CueInputs& in, uint32_t nowMs) {
     serial_ = in.emergencySerial;
   }
   if (!reminderActive_ || newEmergency) {
+    confirmedSeen_ = false;
     muted_ = false;
     worseNews_ = false;
     worseToldThisMute_ = false;
@@ -94,8 +95,11 @@ CueDecision CueScheduler::decide(const CueInputs& in, uint32_t nowMs) {
     pressSerial_ = serial_;
   }
 
-  // An acknowledgement on its way ends this emergency: a Hold now is not a mute.
-  const bool confirming = in.pending == Cue::Confirmed || replay_ == Cue::Confirmed ||
+  // An acknowledgement ends this emergency: a Hold now is not a mute. The loop
+  // posts "confirmed" before it stops publishing the reminder (an NVS save in
+  // between), so once seen it counts until the reminder goes or changes.
+  if (reminderActive_ && in.pending == Cue::Confirmed) confirmedSeen_ = true;
+  const bool confirming = confirmedSeen_ || replay_ == Cue::Confirmed ||
                           (!in.playerIdle && news_ == Cue::Confirmed);
   const bool toggleMute = in.holdFired && !in.emergencyRaised && reminderActive_ &&
                           pressSawEmergency_ && pressSerial_ == serial_ &&

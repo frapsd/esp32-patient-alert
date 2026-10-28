@@ -30,7 +30,7 @@
 - **Secure transport**: TLS to `api.pushover.net` with certificate verification against embedded root CAs; never disabled.
 - **Watchdog**: a 60 s watchdog restarts the board if the main loop or the button/LED task hangs.
 - **Buzzer cues**: every press, sent request, acknowledgement and live emergency also has a sound, for a patient who cannot see the LED.
-- **Tested logic**: pure C++ in `lib/alert_core`, 148 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
+- **Tested logic**: pure C++ in `lib/alert_core`, 152 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
 
 Principle: when in doubt, emergency. The one exception is the 3-minute "confirmed" window: there a gesture means what it always means, because a patient who cannot see the solid LED cannot know the window is open. During a live emergency, on the other hand, a hold raises nothing new: it mutes (or unmutes) the buzzer reminders, without stopping the emergency.
 
