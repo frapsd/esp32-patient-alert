@@ -7,11 +7,13 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 - Buzzer cues for a patient who cannot see the LED: a beep the moment the button goes down (a lower one when nothing can be sent), a warble when the hold arms an emergency, then cues for a delivered light request and for an acknowledgement. While an emergency is live a reminder repeats every 5 s for 2 minutes, then every 30 s, with a distinct low tone when the emergency is not getting out (no Wi-Fi, a failed send, or rejected). A cue cut short by a press plays again afterwards, unless an emergency started meanwhile; presses never delay the reminder, outside an emergency the press beep is low whenever the last request failed (during one it agrees with the reminder), news still queued when an emergency starts is dropped, and an emergency raised by a second press within 60 s gets the same warble as a hold.
 - LED "press again" window: after a short press the LED blinks at a medium pace (0.3 s on, 0.3 s off) for the 60 s in which another press raises an emergency. It ranks just below an active emergency, so it also shows inside the confirmed window and offline; inside it the 3 s "sent" solid is not shown (the buzzer still announces delivery).
+- Mute for the emergency reminder: a 2.5 s hold during an emergency live for at least 30 s silences its buzzer reminders (two falling notes); another hold brings them back. The emergency itself goes on. Muting ends with that emergency; an emergency that stops getting out while muted says so once. Holds in the first 30 s, or started before the emergency, still play "armed".
 - Default pins for the final hardware: button GPIO25, LED GPIO27, piezo buzzer between GPIO32 and GPIO33 in antiphase.
 
 ### Changed
 - Hold threshold raised from 1.5 s to 2.5 s.
 - Confirmed window ("help is coming", solid LED) shortened from 10 to 3 minutes.
+- The emergency reminder thins out further: every 5 s for 2 minutes, every 30 s up to 10 minutes, then every 2 minutes.
 - Timed LED changes are carried out by the button/LED task from a plan published by the main loop, so the window, "sent" and "confirmed" end on time even while the loop is blocked in a request.
 - Inside the confirmed window gestures keep their usual meaning (tap = light request, hold or a second tap within 60 s = emergency). Before, any press there sent a new emergency; the patient cannot see the solid LED that says the window is open. A gesture made while the emergency was still unacknowledged and processed after the acknowledgement is still ignored. A tap now counts from the moment the button went down (not its release), a hold from its 2.5 s threshold.
 

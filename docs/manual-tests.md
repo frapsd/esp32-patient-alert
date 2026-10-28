@@ -17,7 +17,8 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
 - [ ] **2. Pressione lunga**
   - Passi: tenere premuto oltre 2,5 s (l'emergenza parte senza aspettare il rilascio).
   - Buzzer: bip acuto alla pressione, trillo veloce allo scadere dei 2,5 s (anche con il dito
-    ancora sul bottone), poi un trillo breve ogni 5 s finché nessuno conferma.
+    ancora sul bottone), poi un trillo breve ogni 5 s finché nessuno conferma (ritmo completo
+    nel test 11).
   - LED: lampeggio veloce continuo (0,1 s acceso / 0,1 s spento).
   - Telefoni: notifica "EMERGENZA" a priorità 2, suona anche in silenzioso/Non disturbare e si
     ripete circa ogni 30 s finché non si conferma.
@@ -49,8 +50,9 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
 - [ ] **6. Pressione durante emergenza non confermata**
   - Passi: dopo l'emergenza, senza confermare, premere ancora (breve e lunga).
   - LED: continua a lampeggiare veloce.
-  - Buzzer: bip a ogni pressione (e trillo veloce a quella lunga), poi riprendono i trilli di
-    attesa.
+  - Buzzer: bip a ogni pressione; una pressione lunga nei primi 30 s dell'emergenza dà il
+    trillo veloce di armata, dopo i 30 s le due note che scendono (silenziato, test 13). Poi
+    riprendono i trilli di attesa (se non silenziato).
   - Telefoni: nessun nuovo allarme oltre alle ripetizioni normali.
 - [ ] **7. Wi-Fi spento durante un'emergenza**
   - Passi: spegnere il router/hotspot, premere a lungo, attendere, riaccendere.
@@ -66,6 +68,9 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
     premere a lungo. Buzzer: dopo il primo invio fallito, i due toni gravi al posto dei trilli
     di attesa, e ogni pressione dà il bip grave; ricollegando il cavo, all'invio riuscito
     tornano i trilli. Premendo di continuo, ogni pressione dà il bip grave.
+  - Variante silenzio: con il Wi-Fi spento e l'emergenza da più di 30 s, pressione lunga:
+    due note che scendono, poi silenzio (LED sempre a lampeggio veloce). Riaccendere la rete:
+    l'emergenza parte, nessun suono di richiamo.
   - Variante: spegnere la rete e fare una pressione breve; al ritorno arriva la richiesta con
     "Richiesta delle HH:MM" con l'ora della pressione.
 - [ ] **8. Riavvio durante un'emergenza**
@@ -101,13 +106,14 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
   - LED: due lampi brevi ogni 2 s a riposo, dopo i 60 s di lampeggio medio della pressione
     breve (durante un'emergenza resta il lampeggio veloce).
   - Buzzer: due toni gravi lunghi una volta quando compare l'errore. Durante un'emergenza
-    rifiutata gli stessi toni si ripetono (ogni 5 s per 2 minuti, poi ogni 30 s) al posto dei
-    trilli di attesa. Le pressioni successive danno il bip grave.
+    rifiutata gli stessi toni si ripetono (ogni 5 s per 2 minuti, ogni 30 s fino a 10
+    minuti, poi ogni 2 minuti) al posto dei trilli di attesa. Le pressioni successive danno il bip grave.
   - Telefoni: nessuna notifica; il dispositivo riprova ogni 5 minuti.
   - Poi ripristinare il token giusto.
 - [ ] **11. Richiamo lungo durante un'emergenza**
-  - Passi: fare un'emergenza e non confermarla per almeno 3 minuti.
-  - Buzzer: un trillo breve ogni 5 s per i primi 2 minuti, poi uno ogni 30 s. Una pressione
+  - Passi: fare un'emergenza e non confermarla per almeno 13 minuti.
+  - Buzzer: un trillo breve ogni 5 s per i primi 2 minuti, poi uno ogni 30 s fino a 10
+    minuti, poi uno ogni 2 minuti. Una pressione
     durante l'attesa suona il bip ma non sposta il trillo successivo, che arriva sempre ogni
     5 s (aspettando solo la fine del bip).
 - [ ] **12. Finestra "premi ancora" con internet staccato**
@@ -119,3 +125,15 @@ buzzer sono descritti nel README, sezione "Cosa dice il buzzer".
   - Ripetere premendo una seconda volta a lampeggio medio in corso: deve partire l'emergenza
     (trillo veloce, anche se arriva solo a tentativo finito), con i due toni gravi finché
     internet manca.
+- [ ] **13. Silenziare e riattivare i richiami**
+  - Passi: fare un'emergenza (pressione lunga) e non confermarla.
+  - Subito dopo il trillo di armata, un'altra pressione lunga: di nuovo il trillo di armata,
+    i richiami continuano (i primi 30 s non si silenzia).
+  - Dopo almeno 30 s, pressione lunga: bip alla pressione, poi due note che scendono; nessun
+    richiamo dopo (aspettare almeno 2 minuti). Una pressione breve dà ancora il bip; il LED
+    lampeggia sempre veloce; i telefoni continuano a ricevere l'emergenza.
+  - Pressione lunga di nuovo: il richiamo suona subito e riprende al suo ritmo.
+  - Silenziare ancora e confermare da un telefono: suonano le tre note della conferma. Poi
+    una nuova emergenza (pressione lunga): trillo di armata e richiami normali, non
+    silenziata.
+  - Riavviare durante un'emergenza silenziata: i richiami ripartono (ogni 5 s).

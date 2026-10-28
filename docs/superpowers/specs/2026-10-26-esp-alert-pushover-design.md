@@ -157,7 +157,8 @@ I pattern esatti li sceglie il builder; vanno documentati nel README.
 
 **Rivisto il 2026-10-28:** aggiunto il pattern della finestra "premi ancora = emergenza" e
 portata la finestra "confermata" a 3 minuti; vedi
-`2026-10-28-led-upgrade-window-design.md`.
+`2026-10-28-led-upgrade-window-design.md`. Richiami del buzzer silenziabili dal paziente con
+una pressione lunga e diradati nel tempo: vedi `2026-10-28-buzzer-mute-design.md`.
 
 ## Robustezza
 

@@ -32,7 +32,8 @@ torna a riposo se i 3 minuti erano già finiti.
 
 Principio: nel dubbio, emergenza. L'unica eccezione è la finestra "confermata" di 3 minuti: lì
 un gesto vale come sempre, perché un paziente che non vede il LED fisso non può sapere che la
-finestra è aperta.
+finestra è aperta. Durante un'emergenza attiva, invece, la pressione lunga non chiama nulla di
+nuovo: silenzia (o riattiva) i richiami del buzzer, senza fermare l'emergenza.
 
 ## Come si usa il bottone
 
@@ -42,6 +43,7 @@ finestra è aperta.
 | Pressione tenuta 2,5 s o più | Emergenza (scatta allo scadere di 2,5 s, senza aspettare il rilascio) |
 | Un'altra pressione entro 60 s da una richiesta leggera (il LED lampeggia a ritmo medio finché la finestra è aperta) | Emergenza |
 | Qualsiasi pressione mentre un'emergenza è attiva e non confermata | Nessun nuovo allarme (il LED continua a lampeggiare veloce) |
+| Pressione tenuta 2,5 s durante un'emergenza attiva da almeno 30 s | Silenzia i richiami del buzzer per quell'emergenza; un'altra la riattiva. L'emergenza continua: invii, telefoni e LED non cambiano |
 | Pressione mentre il LED è fisso "confermata" | Come sempre: breve = leggera, lunga = emergenza |
 
 Se manca la rete, la pressione viene ricordata e l'invio parte appena la connessione torna.
@@ -92,18 +94,23 @@ legato all'età.
 |---|---|
 | Un bip acuto (0,3 s) appena si preme | Pressione ricevuta |
 | Un bip grave (0,3 s) appena si preme | Pressione ricevuta, ma ora non si può inviare: offline, errore di configurazione, o l'ultimo invio è fallito (Wi-Fi su ma niente internet). Fuori da un'emergenza il tocco resta comunque in coda come richiesta leggera |
-| Trillo veloce (circa 0,8 s) dopo 2,5 s di pressione, oppure quando il dispositivo elabora una seconda pressione entro 60 s (dopo l'eventuale invio già in corso) | Emergenza armata, si può lasciare il bottone |
+| Trillo veloce (circa 0,8 s) dopo 2,5 s di pressione, oppure quando il dispositivo elabora una seconda pressione entro 60 s (dopo l'eventuale invio già in corso) | Emergenza armata, si può lasciare il bottone. Anche per una pressione lunga nei primi 30 s di un'emergenza: l'emergenza è partita, il buzzer non viene silenziato |
+| Due note che scendono | Richiami silenziati per questa emergenza (pressione lunga); un'altra pressione lunga li riattiva e il richiamo suona subito |
 | Due bip | Richiesta leggera consegnata a Pushover (anche durante la finestra "premi ancora" o "confermata", quando il LED non mostra il fisso di 3 s) |
 | Tre note che salgono, due volte | Qualcuno ha confermato l'emergenza |
-| Trillo breve, ripetuto | Emergenza attiva e non ancora confermata: ogni 5 s per i primi 2 minuti, poi ogni 30 s |
-| Due toni gravi lunghi, ripetuti con lo stesso ritmo | Emergenza attiva ma **che non esce**: niente Wi-Fi, un invio fallito (Wi-Fi su ma internet giù, Pushover irraggiungibile), oppure Pushover la rifiuta |
+| Trillo breve, ripetuto | Emergenza attiva e non ancora confermata: ogni 5 s per i primi 2 minuti, ogni 30 s fino a 10 minuti, poi ogni 2 minuti |
+| Due toni gravi lunghi, ripetuti con lo stesso ritmo | Emergenza attiva ma **che non esce**: niente Wi-Fi, un invio fallito (Wi-Fi su ma internet giù, Pushover irraggiungibile), oppure Pushover la rifiuta. Con i richiami silenziati suonano una volta sola, se l'emergenza che usciva smette di uscire |
 | Due toni gravi lunghi, una volta | Errore di configurazione fuori da un'emergenza |
 
 Una pressione suona sempre subito, interrompendo qualsiasi altro suono; gli altri avvisi
 aspettano che il buzzer sia in silenzio, e un avviso interrotto da una pressione viene
 ripetuto subito dopo, a meno che nel frattempo sia partita un'emergenza. Le pressioni non
 ritardano mai il richiamo dell'emergenza; durante un'emergenza è il bip stesso della pressione
-a dire se esce (acuto) o no (grave).
+a dire se esce (acuto) o no (grave). Con i richiami silenziati il bip delle pressioni e gli
+avvisi (consegna, conferma) suonano come sempre. Il silenzio dura fino alla fine di
+quell'emergenza (conferma da telefono); il rinvio automatico dopo 25 minuti senza conferma è
+la stessa emergenza e resta silenziato. Dopo un riavvio i richiami ripartono, dal ritmo di
+5 s.
 
 ## Configurare Pushover
 
@@ -224,7 +231,10 @@ evitare.
 
 - Senza internet o senza corrente l'allarme non parte, e nessuno è avvisato che il dispositivo
   è fuori uso. Alimentazione solo USB, nessuna batteria tampone.
-- Solo Android testato/previsto; niente annullamento di un falso allarme dal bottone.
+- Solo Android testato/previsto; niente annullamento di un falso allarme dal bottone
+  (silenziare il buzzer non annulla l'emergenza: i telefoni continuano a suonare).
+- Con il Wi-Fi giù e i richiami silenziati, l'unico segnale in casa è il LED; l'emergenza
+  parte da sola appena torna la rete.
 
 ## Prossimi passi
 

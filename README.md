@@ -30,9 +30,9 @@
 - **Secure transport**: TLS to `api.pushover.net` with certificate verification against embedded root CAs; never disabled.
 - **Watchdog**: a 60 s watchdog restarts the board if the main loop or the button/LED task hangs.
 - **Buzzer cues**: every press, sent request, acknowledgement and live emergency also has a sound, for a patient who cannot see the LED.
-- **Tested logic**: pure C++ in `lib/alert_core`, 128 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
+- **Tested logic**: pure C++ in `lib/alert_core`, 148 native Unity tests (`pio test -e native`), plus a manual hardware checklist.
 
-Principle: when in doubt, emergency. The one exception is the 3-minute "confirmed" window: there a gesture means what it always means, because a patient who cannot see the solid LED cannot know the window is open.
+Principle: when in doubt, emergency. The one exception is the 3-minute "confirmed" window: there a gesture means what it always means, because a patient who cannot see the solid LED cannot know the window is open. During a live emergency, on the other hand, a hold raises nothing new: it mutes (or unmutes) the buzzer reminders, without stopping the emergency.
 
 ## How it works
 
@@ -63,6 +63,7 @@ Until the emergency is acknowledged, Pushover repeats it every 30 s and the LED 
 | Hold 2.5 s or more | Emergency (fires when 2.5 s elapse, without waiting for release) |
 | Another press within 60 s of a light request (the LED blinks at a medium pace while this window is open) | Emergency |
 | Any press while an emergency is active and unacknowledged | No new alarm (LED keeps blinking fast) |
+| Hold 2.5 s during an emergency live for at least 30 s | Mutes the buzzer reminders for that emergency; another hold unmutes them. The emergency goes on: sends, phones and LED do not change |
 | Press while the LED is solid "confirmed" | As always: short = light, long = emergency |
 
 ## LED patterns
@@ -89,14 +90,15 @@ The buzzer carries the LED's news, for a patient who cannot see it; only the "pr
 |---|---|
 | One high beep (0.3 s) as soon as the button goes down | Press registered |
 | One low beep (0.3 s) as soon as the button goes down | Press registered, but nothing can be sent now: offline, configuration error, or the last request failed (Wi-Fi up but no internet). Outside an emergency a tap is still queued as a light request |
-| Fast warble (about 0.8 s) after holding 2.5 s, or when the device processes a second press within 60 s (after any request already in progress) | Emergency armed, the button can be released |
+| Fast warble (about 0.8 s) after holding 2.5 s, or when the device processes a second press within 60 s (after any request already in progress) | Emergency armed, the button can be released. Also for a hold in the first 30 s of an emergency: it has started, the buzzer is not muted |
+| Two falling notes | Reminders muted for this emergency (a hold); another hold unmutes them and the reminder sounds at once |
 | Two beeps | Light request delivered to Pushover (also inside the "press again" window or the confirmed window, where the LED does not show the 3 s solid) |
 | Rising three-note phrase, twice | Someone acknowledged the emergency |
-| Short warble, repeated | Emergency live and not yet acknowledged: every 5 s for the first 2 minutes, then every 30 s |
-| Two long low tones, repeated on the same schedule | Emergency live but **not getting out**: no Wi-Fi, a failed send (Wi-Fi up but no internet, Pushover unreachable), or Pushover rejects it |
+| Short warble, repeated | Emergency live and not yet acknowledged: every 5 s for the first 2 minutes, every 30 s up to 10 minutes, then every 2 minutes |
+| Two long low tones, repeated on the same schedule | Emergency live but **not getting out**: no Wi-Fi, a failed send (Wi-Fi up but no internet, Pushover unreachable), or Pushover rejects it. With reminders muted they sound once, if an emergency that was getting out stops getting out |
 | Two long low tones, once | Configuration error outside an emergency |
 
-A press always sounds at once, cutting short any other cue; the other news waits until the buzzer is silent, and news cut short by a press plays again afterwards, unless an emergency started in the meantime. Presses never delay the emergency reminder; during an emergency the press beep itself says whether it is getting out (high) or not (low).
+A press always sounds at once, cutting short any other cue; the other news waits until the buzzer is silent, and news cut short by a press plays again afterwards, unless an emergency started in the meantime. Presses never delay the emergency reminder; during an emergency the press beep itself says whether it is getting out (high) or not (low). With reminders muted, press beeps and news (delivered, acknowledged) still sound. Muting lasts until that emergency ends (acknowledged on a phone); the automatic re-send after 25 minutes without acknowledgement is the same emergency and stays muted. After a reboot the reminders start again, at the 5 s rhythm.
 
 ## Hardware
 
@@ -165,7 +167,8 @@ Then work through [docs/manual-tests.md](docs/manual-tests.md).
 ## Limitations
 
 - Without internet or power the alarm does not fire, and nobody is told the device is out of service. USB power only, no backup battery.
-- Android only (the intended and tested target); no way to cancel a false alarm from the button.
+- Android only (the intended and tested target); no way to cancel a false alarm from the button (muting the buzzer does not cancel the emergency: the phones keep ringing).
+- With Wi-Fi down and the reminders muted, the LED is the only sign at home; the emergency goes out by itself as soon as the network is back.
 - v1 has not been validated end to end on a real network (see the status note above).
 
 ## Roadmap
