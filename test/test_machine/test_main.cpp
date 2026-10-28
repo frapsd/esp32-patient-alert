@@ -885,6 +885,40 @@ static void test_led_plan_emergency_single_step() {
   assertPlan(m.ledPlan(0, true), 0, 1, pat, off);
 }
 
+static void test_emergency_serial_counts_new_emergencies() {
+  AlertMachine m(kCfg);
+  TEST_ASSERT_EQUAL_UINT8(0, m.emergencySerial());
+  const uint32_t ack = toConfirmed(m, 0, "");
+  TEST_ASSERT_EQUAL_UINT8(1, m.emergencySerial());
+  m.onGesture(Gesture::Hold, ack + 1000, ack + 1000, kEpoch);
+  TEST_ASSERT_EQUAL_UINT8(2, m.emergencySerial());
+  m.onGesture(Gesture::Hold, ack + 5000, ack + 5000, kEpoch);  // already live: ignored
+  TEST_ASSERT_EQUAL_UINT8(2, m.emergencySerial());
+
+  AlertMachine t(kCfg);
+  t.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  TEST_ASSERT_EQUAL_UINT8(0, t.emergencySerial());
+  t.onGesture(Gesture::Tap, 1000, 1000, kEpoch);  // the upgrade
+  TEST_ASSERT_EQUAL_UINT8(1, t.emergencySerial());
+}
+
+// Re-sending after Pushover gave up is the same emergency for the patient.
+static void test_emergency_serial_kept_on_reescalation() {
+  AlertMachine m(kCfg);
+  toAwaitingAck(m, 0, "r1");
+  ASSERT_KIND(CommandKind::PollReceipt, drain(m, 10000));
+  m.onReceipt(receiptResult(HttpOutcome::Ok, false, true, ""), 10000, kEpoch);
+  ASSERT_MODE(Mode::EmergencyPending, m.mode());
+  TEST_ASSERT_EQUAL_UINT8(1, m.emergencySerial());
+
+  AlertMachine r(kCfg);
+  toAwaitingAck(r, 0, "r1");
+  ASSERT_KIND(CommandKind::PollReceipt, drain(r, 10000));
+  r.onReceipt(receiptResult(HttpOutcome::Rejected, false, false, ""), 10000, kEpoch);
+  ASSERT_MODE(Mode::EmergencyPending, r.mode());
+  TEST_ASSERT_EQUAL_UINT8(1, r.emergencySerial());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_tap_queues_light_request);
@@ -933,5 +967,7 @@ int main(int, char**) {
   RUN_TEST(test_led_plan_four_steps);
   RUN_TEST(test_led_plan_emergency_single_step);
   RUN_TEST(test_led_plan_offline_and_config_error_after_window);
+  RUN_TEST(test_emergency_serial_counts_new_emergencies);
+  RUN_TEST(test_emergency_serial_kept_on_reescalation);
   return UNITY_END();
 }

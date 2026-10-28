@@ -2,6 +2,7 @@
 
 AudioState audioState(const AlertMachine& m, bool online) {
   AudioState a;
+  a.serial = m.emergencySerial();
   // online only means Wi-Fi and a valid clock: the internet behind the router
   // can still be down, which only a failed request reveals.
   const bool reachable = online && !m.configError();

@@ -95,6 +95,13 @@ static void test_emergency_after_failing_requests_starts_as_failed() {
   TEST_ASSERT_FALSE(a.canSend);
 }
 
+static void test_audio_state_carries_serial() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Hold, 0, 0, kEpoch);
+  TEST_ASSERT_EQUAL_UINT8(m.emergencySerial(), audioState(m, true).serial);
+  TEST_ASSERT_EQUAL_UINT8(1, audioState(m, true).serial);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_idle_press_can_be_sent_only_online);
@@ -105,5 +112,6 @@ int main(int, char**) {
   RUN_TEST(test_failing_light_request_cannot_send);
   RUN_TEST(test_delivered_emergency_press_beep_agrees_with_reminder);
   RUN_TEST(test_emergency_after_failing_requests_starts_as_failed);
+  RUN_TEST(test_audio_state_carries_serial);
   return UNITY_END();
 }

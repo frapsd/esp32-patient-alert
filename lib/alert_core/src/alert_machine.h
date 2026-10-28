@@ -62,6 +62,11 @@ class AlertMachine {
   bool emergencyLive() const {
     return mode_ == Mode::EmergencyPending || mode_ == Mode::EmergencyAwaitingAck;
   }
+  // Counts the emergencies the patient started (a Hold, or the upgrade rule),
+  // so the buzzer can tell a new emergency from the same one going on. A
+  // re-send after Pushover gave up, or rejected the receipt, keeps the number.
+  // Wraps at 256; only a change matters.
+  uint8_t emergencySerial() const { return emergencySerial_; }
   // An emergency is waiting to be sent and its last attempt failed (no
   // internet behind the Wi-Fi, Pushover down, TLS error...): nobody has it yet.
   bool emergencySendFailing() const {
@@ -106,6 +111,7 @@ class AlertMachine {
   bool configError_ = false;
   bool emergencySendFailed_ = false;  // last SendEmergency for this emergency failed
   bool lastRequestFailed_ = false;
+  uint8_t emergencySerial_ = 0;
 
   Timer emergencyTimer_;  // send in EmergencyPending, poll in EmergencyAwaitingAck
 

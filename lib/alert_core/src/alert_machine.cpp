@@ -183,6 +183,7 @@ void AlertMachine::onGesture(Gesture g, uint32_t nowMs, uint32_t pressMs, uint32
     // pressed while the emergency was unacknowledged: ignored
   } else if (g == Gesture::Hold || upgrade) {
     triggerEmergency(nowMs);
+    emergencySerial_++;
   } else {
     if (lightCount_ < kLightQueueCap) {
       if (lightCount_ == 0) lightTimer_.set(nowMs, 0);

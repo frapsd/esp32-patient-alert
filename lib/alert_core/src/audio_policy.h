@@ -7,6 +7,7 @@
 struct AudioState {
   bool canSend = false;      // a press now could get out: Press, else PressOffline
   Cue reminder = Cue::None;  // repeated while an emergency is live
+  uint8_t serial = 0;        // AlertMachine::emergencySerial(), to tell emergencies apart
 };
 
 // online: Wi-Fi and a valid clock, as netOnline() reports it.
