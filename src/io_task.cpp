@@ -26,9 +26,11 @@ LedPlan gPlan = [] {
   return p;
 }();
 // Written by the loop task on core 1, read by the io task on core 0.
-std::atomic<uint8_t> gPendingCues{0};  // cueBit() set of news to play
+std::atomic<uint16_t> gPendingCues{0};  // cueBit() set of news to play
 std::atomic<bool> gEmergencyRaised{false};
-std::atomic<uint8_t> gReminder{static_cast<uint8_t>(Cue::None)};
+// One word, so the reminder and the emergency it belongs to are read together:
+// low byte the reminder Cue, high byte AlertMachine::emergencySerial().
+std::atomic<uint16_t> gReminder{static_cast<uint16_t>(Cue::None)};
 std::atomic<bool> gCanSend{false};
 
 // Reprogramming the LEDC timer on every tick makes the piezo stutter, so only
@@ -47,7 +49,8 @@ void buzzerWrite(uint16_t freqHz) {
 void ioTask(void*) {
   esp_task_wdt_add(nullptr);  // watchdog already initialised by setup()
   ButtonInterpreter button(kDebounceMs, kHoldMs);
-  CueEngine cues(kEmergencyChirpMs, kEmergencyChirpFastForMs, kEmergencyChirpSlowMs);
+  CueEngine cues(kEmergencyChirpMs, kEmergencyChirpFastForMs, kEmergencyChirpSlowMs,
+                 kEmergencyChirpSlowForMs, kEmergencyChirpSlowestMs, kMuteGraceMs);
   bool wasPressed = false;
   uint32_t pressEpoch = 0;
   TickType_t lastWake = xTaskGetTickCount();
@@ -69,16 +72,18 @@ void ioTask(void*) {
     in.holdFired = g && *g == Gesture::Hold;
     in.canSend = gCanSend.load(std::memory_order_relaxed);
     in.emergencyRaised = gEmergencyRaised.exchange(false, std::memory_order_relaxed);
-    const uint8_t pendingMask = gPendingCues.load(std::memory_order_relaxed);
+    const uint16_t pendingMask = gPendingCues.load(std::memory_order_relaxed);
     in.pending = firstPending(pendingMask);
-    in.reminder = static_cast<Cue>(gReminder.load(std::memory_order_relaxed));
+    const uint16_t reminder = gReminder.load(std::memory_order_relaxed);
+    in.reminder = static_cast<Cue>(reminder & 0xFF);
+    in.emergencySerial = static_cast<uint8_t>(reminder >> 8);
     CueDecision d;
     buzzerWrite(cues.tick(in, now, d));
     // Clear only what was read: news posted meanwhile stays for later.
     if (d.dropPending) {
-      gPendingCues.fetch_and(static_cast<uint8_t>(~pendingMask), std::memory_order_relaxed);
+      gPendingCues.fetch_and(static_cast<uint16_t>(~pendingMask), std::memory_order_relaxed);
     } else if (d.pendingTaken) {
-      gPendingCues.fetch_and(static_cast<uint8_t>(~cueBit(in.pending)), std::memory_order_relaxed);
+      gPendingCues.fetch_and(static_cast<uint16_t>(~cueBit(in.pending)), std::memory_order_relaxed);
     }
 
     if (g) {
@@ -91,7 +96,7 @@ void ioTask(void*) {
                         hold ? netWallEpoch() : pressEpoch};
       bool queued = xQueueSend(gQueue, &item, 0) == pdTRUE;
       if (!queued && hold) {
-        // The patient already heard "armed": a Hold makes room by dropping
+        // The patient already heard this Hold answered: it makes room by dropping
         // the oldest gesture rather than being dropped itself. The loop may
         // have drained the queue meanwhile, so retry the send either way.
         GestureEvent oldest;
@@ -152,5 +157,6 @@ void ioEmergencyRaised() {
 
 void ioSetAudioState(const AudioState& a) {
   gCanSend.store(a.canSend, std::memory_order_relaxed);
-  gReminder.store(static_cast<uint8_t>(a.reminder), std::memory_order_relaxed);
+  gReminder.store(static_cast<uint16_t>(static_cast<uint8_t>(a.reminder) | (a.serial << 8)),
+                  std::memory_order_relaxed);
 }

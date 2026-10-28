@@ -23,8 +23,14 @@ constexpr uint32_t kRejectedRetryMs = 300000;
 constexpr uint32_t kLightSentShowMs = 3000;
 constexpr uint32_t kWatchdogS = 60;
 constexpr uint32_t kHttpTimeoutMs = 15000;
-// Reminder while an emergency is live: every 5 s for the first 2 minutes, then
-// every 30 s, so a long unacknowledged emergency stays bearable at night.
+// Reminder while an emergency is live: every 5 s for the first 2 minutes, every
+// 30 s up to 10 minutes, then every 2 minutes, so a long unacknowledged
+// emergency stays bearable at night. Never silent unless the patient mutes it.
 constexpr uint32_t kEmergencyChirpMs = 5000;
 constexpr uint32_t kEmergencyChirpFastForMs = 120000;
 constexpr uint32_t kEmergencyChirpSlowMs = 30000;
+constexpr uint32_t kEmergencyChirpSlowForMs = 600000;
+constexpr uint32_t kEmergencyChirpSlowestMs = 120000;
+// A Hold mutes an emergency's reminders only once it is this old, so a second
+// hold made "to be sure" right after the first cannot silence it.
+constexpr uint32_t kMuteGraceMs = 30000;
