@@ -56,8 +56,9 @@ ha modo di fermarlo. Richiesta dell'utente: non torturare il paziente.
    delle notizie in coda (durante i primi 30 s il trillo rassicura: l'emergenza è partita).
 5. **Silenziato non vuol dire cieco ai peggioramenti:** se, silenziati, il richiamo passa da
    "in attesa di conferma" a "non esce" (rinvio fallito), suona una volta il "non esce" come
-   notizia, senza riattivare i richiami. Da "non esce" a "in attesa" (rete tornata) nessun
-   suono.
+   notizia, senza riattivare i richiami, e al massimo una volta per ogni silenziamento
+   (una connessione che va e viene non deve ripeterlo). Da "non esce" a "in attesa" (rete
+   tornata) nessun suono.
 6. **Altro comportamento del buzzer:** silenzia/riattiva interrompe il suono in corso come
    ogni input del paziente; il suono "silenziato" è una notizia, quindi se una pressione lo
    interrompe viene ripetuto. Da silenziato i bip alla pressione e le notizie (conferma,

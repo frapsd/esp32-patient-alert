@@ -84,3 +84,11 @@ Scheduler state added: `serial_`, `muted_`, `pressSerialValid_`, `pressSerial_`,
 **Files:** `README.md`, `README.it.md`, `CHANGELOG.md`, `docs/manual-tests.md`, `docs/superpowers/specs/2026-10-26-esp-alert-pushover-design.md`.
 
 - [ ] Per the spec's Documentazione section: gesture row "Pressione lunga durante un'emergenza attiva da almeno 30 s → silenzia (o riattiva) i richiami del buzzer; nessun nuovo allarme", principle exception, buzzer table (Muted row, "armed" row incl. first 30 s of an emergency, reminder row three phases, worse-while-muted), Limitations (muting is not cancelling; reboot unmutes, rhythm restarts), test count, CHANGELOG Added/Changed, manual tests 2, 6, 7, 10, 11 + new mute test. Commit `docs: mute and thinning of emergency reminders`.
+
+## Revisions after the adversarial plan review
+
+- Task 2 tests: the first reminder of a stream starts at 5000, not 0. `test_hold_pressed_before_emergency_is_armed` uses a scheduler with grace 1000: press 40000, reminder from 40500, hold 42500 → armed; control: press 41000, hold 43500 → muted. New: `test_hold_while_confirmed_playing_is_armed` (Confirmed started 41000, hold 42500, player busy); `test_unmute_keeps_the_phase` (unmute at 300000 → reminder at 300000, next at 330000); `test_muted_cue_cut_by_a_press_plays_again`; `test_first_pending_includes_muted` (`uint16_t` mask). `test_new_serial_clears_mute` asserts exactly 100000 then 105000.
+- A serial change counts as a new emergency for the interval rule (like `!wasActive`), so its first reminder is not held back by the old cadence.
+- `confirming` also covers `replay_ == Confirmed`.
+- "Worse while muted" plays at most once per mute (latched until unmute or the emergency ends), so a flapping connection cannot repeat it.
+- Also update: `CueEngine` call in test_buzzer, enum comment, static_assert, `firstPending` loop bound (`i < 16`), two-phase class comment.
