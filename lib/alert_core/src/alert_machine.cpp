@@ -36,6 +36,15 @@ bool AlertMachine::confirmedExpired(uint32_t nowMs) const {
   return (uint32_t)(nowMs - confirmedAtMs_) >= cfg_.confirmedWindowS * 1000u;
 }
 
+// A second press now would upgrade to an emergency (press to press).
+bool AlertMachine::upgradeWindowOpen(uint32_t nowMs) const {
+  return hasLastLightPress_ && (uint32_t)(nowMs - lastLightPressMs_) < cfg_.lightUpgradeWindowMs;
+}
+
+bool AlertMachine::lightShownAt(uint32_t nowMs) const {
+  return lightShown_ && (uint32_t)(nowMs - lightShownAtMs_) < cfg_.lightSentShowMs;
+}
+
 // Ends time-limited state so stale timestamps never alias after a millis wrap.
 void AlertMachine::expireTimedState(uint32_t nowMs) {
   if (mode_ == Mode::Confirmed && confirmedExpired(nowMs)) {
@@ -43,7 +52,8 @@ void AlertMachine::expireTimedState(uint32_t nowMs) {
     confirmedAtEpoch_ = 0;
     confirmUnresolved_ = false;
   }
-  if (hasLastLightPress_ && (uint32_t)(nowMs - lastLightPressMs_) >= cfg_.lightUpgradeWindowMs) {
+  if (hasLastLightPress_ &&
+      (uint32_t)(nowMs - lastLightPressMs_) >= cfg_.lightUpgradeWindowMs + kLightPressMemoryMs) {
     hasLastLightPress_ = false;
   }
   if (lightShown_ && (uint32_t)(nowMs - lightShownAtMs_) >= cfg_.lightSentShowMs) {
@@ -282,15 +292,55 @@ void AlertMachine::onAckNoticeSent(HttpOutcome o, uint32_t nowMs) {
   }
 }
 
+void AlertMachine::tick(uint32_t nowMs) {
+  PersistedState before = persisted();
+  expireTimedState(nowMs);
+  commit(before);
+}
+
 LedPattern AlertMachine::led(uint32_t nowMs, bool online) const {
   if (mode_ == Mode::EmergencyPending || mode_ == Mode::EmergencyAwaitingAck) {
     return LedPattern::EmergencyActive;
   }
+  // Above everything else: for these 60 s it is what the patient can act on.
+  if (upgradeWindowOpen(nowMs)) return LedPattern::UpgradeWindow;
   if (mode_ == Mode::Confirmed && !confirmedExpired(nowMs)) return LedPattern::Confirmed;
   if (configError_) return LedPattern::ConfigError;
   if (!online) return LedPattern::Offline;
-  if (lightShown_ && (uint32_t)(nowMs - lightShownAtMs_) < cfg_.lightSentShowMs) {
-    return LedPattern::LightSent;
-  }
+  if (lightShownAt(nowMs)) return LedPattern::LightSent;
   return LedPattern::Idle;
+}
+
+LedPlan AlertMachine::ledPlan(uint32_t nowMs, bool online) const {
+  // Time left to each deadline that is still ahead, under the same age checks
+  // led() uses, so no remaining time can underflow.
+  uint32_t left[kLedPlanSteps - 1];
+  size_t n = 0;
+  if (upgradeWindowOpen(nowMs)) {
+    left[n++] = cfg_.lightUpgradeWindowMs - (nowMs - lastLightPressMs_);
+  }
+  if (lightShownAt(nowMs)) left[n++] = cfg_.lightSentShowMs - (nowMs - lightShownAtMs_);
+  if (mode_ == Mode::Confirmed && !confirmedExpired(nowMs)) {
+    left[n++] = cfg_.confirmedWindowS * 1000u - (nowMs - confirmedAtMs_);
+  }
+  for (size_t i = 1; i < n; i++) {  // insertion sort, at most three
+    for (size_t j = i; j > 0 && left[j] < left[j - 1]; j--) {
+      const uint32_t t = left[j];
+      left[j] = left[j - 1];
+      left[j - 1] = t;
+    }
+  }
+
+  LedPlan p;
+  p.fromMs = nowMs;
+  p.pattern[0] = led(nowMs, online);
+  p.steps = 1;
+  for (size_t i = 0; i < n; i++) {
+    const LedPattern next = led(nowMs + left[i], online);
+    if (next == p.pattern[p.steps - 1]) continue;
+    p.pattern[p.steps] = next;
+    p.offsetMs[p.steps] = left[i];
+    p.steps++;
+  }
+  return p;
 }

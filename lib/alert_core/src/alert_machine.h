@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "alert_types.h"
+#include "led_pattern.h"
 #include "persisted_state.h"
 #include "pushover_protocol.h"
 
@@ -40,12 +41,19 @@ class AlertMachine {
   // pressEpoch 0 = wall time unknown at the press.
   void onGesture(Gesture, uint32_t nowMs, uint32_t pressMs, uint32_t pressEpoch);
   Command nextCommand(uint32_t nowMs);     // None if nothing is due yet
+  // Call every loop iteration: ends timed state that is over, so a stale
+  // timestamp never aliases after a millis() wrap (nextCommand() only runs
+  // while online). Persisted changes mark the state dirty.
+  void tick(uint32_t nowMs);
   void onEmergencySent(const SendResponse&, uint32_t nowMs);
   void onReceipt(const ReceiptStatus&, uint32_t nowMs, uint32_t nowEpoch);
   void onLightSent(HttpOutcome, uint32_t nowMs);
   void onAckNoticeSent(HttpOutcome, uint32_t nowMs);
   Mode mode() const;
   LedPattern led(uint32_t nowMs, bool online) const;
+  // led() now and from each known later deadline (upgrade window end, "sent"
+  // end, confirmed end), assuming online and the config error stay as they are.
+  LedPlan ledPlan(uint32_t nowMs, bool online) const;
   // Pushover rejected the last request; cleared by the next accepted one.
   bool configError() const { return configError_; }
   // An emergency is being sent or awaits acknowledgement.
@@ -72,10 +80,17 @@ class AlertMachine {
     bool due(uint32_t nowMs) const { return (uint32_t)(nowMs - startMs) >= delayMs; }
   };
   static constexpr size_t kLightQueueCap = 4;
+  // How long the first light press is remembered after its window: a second
+  // press made inside the window can be processed much later (a Tap is only
+  // emitted at release, and the loop may be blocked in a request), and must
+  // still upgrade. Far below the 49.7-day millis() wrap.
+  static constexpr uint32_t kLightPressMemoryMs = 3600000;
 
   void triggerEmergency(uint32_t nowMs);
   void expireTimedState(uint32_t nowMs);
   bool confirmedExpired(uint32_t nowMs) const;
+  bool upgradeWindowOpen(uint32_t nowMs) const;
+  bool lightShownAt(uint32_t nowMs) const;
   void retryAfter(Timer& t, HttpOutcome failure, uint32_t nowMs);
   void commit(const PersistedState& before);
 

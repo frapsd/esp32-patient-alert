@@ -66,9 +66,11 @@ static void test_tap_queues_light_request() {
   ASSERT_MODE(Mode::Idle, m.mode());
   m.onLightSent(HttpOutcome::Ok, 1200);
   ASSERT_KIND(CommandKind::None, drain(m, 1200));
-  ASSERT_LED(LedPattern::LightSent, m.led(1200, true));
-  ASSERT_LED(LedPattern::LightSent, m.led(4199, true));
-  ASSERT_LED(LedPattern::Idle, m.led(4200, true));
+  // The upgrade window (60 s from the press) covers "sent"; the buzzer says it.
+  ASSERT_LED(LedPattern::UpgradeWindow, m.led(1200, true));
+  ASSERT_LED(LedPattern::UpgradeWindow, m.led(4200, true));
+  ASSERT_LED(LedPattern::UpgradeWindow, m.led(60999, true));
+  ASSERT_LED(LedPattern::Idle, m.led(61000, true));
   TEST_ASSERT_FALSE(m.takeDirty());
 }
 
@@ -191,7 +193,8 @@ static void test_tap_during_confirmed_is_a_light_request() {
   m.onGesture(Gesture::Tap, t + 20000, t + 20000, kEpoch + 30);
   ASSERT_MODE(Mode::Confirmed, m.mode());  // the window keeps running
   ASSERT_KIND(CommandKind::SendLight, drain(m, t + 20000));
-  ASSERT_LED(LedPattern::Confirmed, m.led(t + 20000, true));
+  ASSERT_LED(LedPattern::UpgradeWindow, m.led(t + 20000, true));
+  ASSERT_LED(LedPattern::Confirmed, m.led(t + 80000, true));
 }
 
 static void test_hold_during_confirmed_is_still_an_emergency() {
@@ -379,8 +382,10 @@ static void test_rejected_send_waits_300s_and_shows_config_error() {
   m.onGesture(Gesture::Tap, t, t, kEpoch);
   ASSERT_KIND(CommandKind::SendLight, drain(m, t));
   m.onLightSent(HttpOutcome::Rejected, t);
-  ASSERT_LED(LedPattern::ConfigError, m.led(t, true));
-  ASSERT_LED(LedPattern::ConfigError, m.led(t, false));
+  ASSERT_LED(LedPattern::UpgradeWindow, m.led(t, true));
+  ASSERT_LED(LedPattern::UpgradeWindow, m.led(t, false));
+  ASSERT_LED(LedPattern::ConfigError, m.led(t + 60000, true));
+  ASSERT_LED(LedPattern::ConfigError, m.led(t + 60000, false));
   ASSERT_KIND(CommandKind::None, drain(m, t + 299999));
   ASSERT_KIND(CommandKind::SendLight, drain(m, t + 300000));
   m.onLightSent(HttpOutcome::Ok, t + 300000);
@@ -727,6 +732,147 @@ static void test_press_inside_confirmed_window_drained_after_expiry_is_a_light_r
   ASSERT_MODE(Mode::Idle, w.mode());
 }
 
+static void test_window_priority() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  ASSERT_LED(LedPattern::UpgradeWindow, m.led(0, false));  // over Offline
+
+  AlertMachine c(kCfg);
+  toConfirmed(c, 100000, "");  // acknowledged at 110000
+  c.onGesture(Gesture::Tap, 120000, 120000, kEpoch);
+  ASSERT_LED(LedPattern::UpgradeWindow, c.led(120000, true));  // over Confirmed
+  ASSERT_LED(LedPattern::Confirmed, c.led(180000, true));
+
+  AlertMachine e(kCfg);
+  toConfirmed(e, 100000, "");
+  e.onGesture(Gesture::Tap, 120000, 120000, kEpoch);
+  e.onGesture(Gesture::Hold, 130000, 130000, kEpoch);
+  ASSERT_LED(LedPattern::EmergencyActive, e.led(130000, true));  // emergency over the window
+}
+
+// A Tap is emitted on release, up to the hold threshold after its press, and the
+// loop keeps expiring state meanwhile: the first press must still be remembered.
+static void test_second_tap_released_after_window_upgrades() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 0));
+  m.onLightSent(HttpOutcome::Ok, 500);
+  ASSERT_KIND(CommandKind::None, drain(m, 60020));
+  m.tick(60020);
+  m.onGesture(Gesture::Tap, 60300, 59000, kEpoch);
+  ASSERT_MODE(Mode::EmergencyPending, m.mode());
+}
+
+static void test_late_first_tap_shows_no_window() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 70000, 5000, kEpoch);
+  ASSERT_LED(LedPattern::Idle, m.led(70000, true));
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 70000));
+}
+
+static void test_press_memory_lasts_one_hour() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  m.tick(3659999);
+  m.onGesture(Gesture::Tap, 3659999, 59000, kEpoch);
+  ASSERT_MODE(Mode::EmergencyPending, m.mode());
+
+  AlertMachine late(kCfg);
+  late.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  late.tick(3660000);
+  late.onGesture(Gesture::Tap, 3660000, 59000, kEpoch);
+  ASSERT_MODE(Mode::Idle, late.mode());
+}
+
+// After a millis() wrap a stale first press would look 10 ms old.
+static void test_press_memory_expires_before_wrap() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  m.tick(3660000);
+  m.onGesture(Gesture::Tap, 10, 10, kEpoch);
+  ASSERT_MODE(Mode::Idle, m.mode());
+}
+
+static void test_tick_expires_confirmed() {
+  AlertMachine m(kCfg);
+  toConfirmed(m, 0, "");  // acknowledged at 10000
+  m.tick(609999);
+  ASSERT_MODE(Mode::Confirmed, m.mode());
+  TEST_ASSERT_FALSE(m.takeDirty());
+  m.tick(610000);
+  ASSERT_MODE(Mode::Idle, m.mode());
+  TEST_ASSERT_TRUE(m.takeDirty());
+}
+
+static void assertPlan(const LedPlan& p, uint32_t fromMs, uint8_t steps, const LedPattern* patterns,
+                       const uint32_t* offsets) {
+  TEST_ASSERT_EQUAL_UINT32(fromMs, p.fromMs);
+  TEST_ASSERT_EQUAL_UINT8(steps, p.steps);
+  for (uint8_t i = 0; i < steps; i++) {
+    ASSERT_LED(patterns[i], p.pattern[i]);
+    TEST_ASSERT_EQUAL_UINT32(offsets[i], p.offsetMs[i]);
+  }
+}
+
+static void test_led_plan_tap() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 300, 0, kEpoch);
+  const LedPattern pat[] = {LedPattern::UpgradeWindow, LedPattern::Idle};
+  const uint32_t off[] = {0, 59700};
+  assertPlan(m.ledPlan(300, true), 300, 2, pat, off);
+}
+
+static void test_led_plan_hides_light_sent_in_window() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 0));
+  m.onLightSent(HttpOutcome::Ok, 1200);
+  const LedPattern pat[] = {LedPattern::UpgradeWindow, LedPattern::Idle};
+  const uint32_t off[] = {0, 58800};
+  assertPlan(m.ledPlan(1200, true), 1200, 2, pat, off);
+}
+
+static void test_led_plan_window_then_confirmed() {
+  AlertMachine m(kCfg);
+  toConfirmed(m, 0, "");  // acknowledged at 10000, window ends at 610000
+  m.onGesture(Gesture::Tap, 20000, 20000, kEpoch);
+  const LedPattern pat[] = {LedPattern::UpgradeWindow, LedPattern::Confirmed, LedPattern::Idle};
+  const uint32_t off[] = {0, 60000, 590000};
+  assertPlan(m.ledPlan(20000, true), 20000, 3, pat, off);
+}
+
+static void test_led_plan_light_sent_after_window() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Tap, 0, 0, kEpoch);
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 70000));  // offline until now
+  m.onLightSent(HttpOutcome::Ok, 70000);
+  const LedPattern pat[] = {LedPattern::LightSent, LedPattern::Idle};
+  const uint32_t off[] = {0, 3000};
+  assertPlan(m.ledPlan(70000, true), 70000, 2, pat, off);
+}
+
+static void test_led_plan_four_steps() {
+  AlertMachine m(kCfg);
+  toConfirmed(m, 0, "");  // acknowledged at 10000, window ends at 610000
+  ASSERT_KIND(CommandKind::SendAckNotice, drain(m, 549000));
+  m.onAckNoticeSent(HttpOutcome::Ok, 549000);
+  m.onGesture(Gesture::Tap, 549000, 549000, kEpoch);  // upgrade window ends at 609000
+  ASSERT_KIND(CommandKind::SendLight, drain(m, 549000));
+  m.onLightSent(HttpOutcome::Ok, 608000);  // "sent" ends at 611000
+  const LedPattern pat[] = {LedPattern::UpgradeWindow, LedPattern::Confirmed, LedPattern::LightSent,
+                            LedPattern::Idle};
+  const uint32_t off[] = {0, 1000, 2000, 3000};
+  assertPlan(m.ledPlan(608000, true), 608000, 4, pat, off);
+}
+
+static void test_led_plan_emergency_single_step() {
+  AlertMachine m(kCfg);
+  m.onGesture(Gesture::Hold, 0, 0, kEpoch);
+  const LedPattern pat[] = {LedPattern::EmergencyActive};
+  const uint32_t off[] = {0};
+  assertPlan(m.ledPlan(0, true), 0, 1, pat, off);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_tap_queues_light_request);
@@ -762,5 +908,17 @@ int main(int, char**) {
   RUN_TEST(test_wraparound_retry_timing);
   RUN_TEST(test_late_drained_second_tap_still_upgrades);
   RUN_TEST(test_press_inside_confirmed_window_drained_after_expiry_is_a_light_request);
+  RUN_TEST(test_window_priority);
+  RUN_TEST(test_second_tap_released_after_window_upgrades);
+  RUN_TEST(test_late_first_tap_shows_no_window);
+  RUN_TEST(test_press_memory_lasts_one_hour);
+  RUN_TEST(test_press_memory_expires_before_wrap);
+  RUN_TEST(test_tick_expires_confirmed);
+  RUN_TEST(test_led_plan_tap);
+  RUN_TEST(test_led_plan_hides_light_sent_in_window);
+  RUN_TEST(test_led_plan_window_then_confirmed);
+  RUN_TEST(test_led_plan_light_sent_after_window);
+  RUN_TEST(test_led_plan_four_steps);
+  RUN_TEST(test_led_plan_emergency_single_step);
   return UNITY_END();
 }
