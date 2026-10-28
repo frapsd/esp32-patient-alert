@@ -18,6 +18,8 @@ constexpr ToneStep kConfirmed[] = {{1000, 220}, {1300, 220}, {1700, 300}, {0, 20
                                    {1000, 220}, {1300, 220}, {1700, 300}};
 constexpr ToneStep kFailed[] = {{500, 400}, {0, 200}, {500, 400}};
 constexpr ToneStep kEmergencyWaiting[] = {{1300, 160}, {1800, 160}, {1300, 160}, {1800, 160}};
+// The only falling cue: "quieter from now on".
+constexpr ToneStep kMuted[] = {{1300, 250}, {800, 400}};
 
 template <size_t N>
 const ToneStep* pick(const ToneStep (&steps)[N], size_t& count) {
@@ -35,6 +37,7 @@ const ToneStep* cueSteps(Cue c, size_t& count) {
     case Cue::Confirmed: return pick(kConfirmed, count);
     case Cue::Failed: return pick(kFailed, count);
     case Cue::EmergencyWaiting: return pick(kEmergencyWaiting, count);
+    case Cue::Muted: return pick(kMuted, count);
     case Cue::None: break;
   }
   count = 0;
@@ -66,16 +69,51 @@ uint16_t CuePlayer::freqAt(uint32_t nowMs) {
 
 CueDecision CueScheduler::decide(const CueInputs& in, uint32_t nowMs) {
   const bool wasActive = reminderActive_;
+  // A new serial is a new emergency even without a silent tick in between.
+  bool newEmergency = false;
   if (in.reminder == Cue::None) {
     reminderActive_ = false;
-  } else if (!reminderActive_) {
+  } else if (!reminderActive_ || in.emergencySerial != serial_) {
+    newEmergency = true;
     reminderActive_ = true;
     reminderSinceMs_ = nowMs;
+    serial_ = in.emergencySerial;
   }
+  if (!reminderActive_ || newEmergency) {
+    muted_ = false;
+    worseNews_ = false;
+    worseToldThisMute_ = false;
+  } else if (muted_ && !worseToldThisMute_ && lastReminderIn_ == Cue::EmergencyWaiting &&
+             in.reminder == Cue::Failed) {
+    worseNews_ = true;
+    worseToldThisMute_ = true;
+  }
+  lastReminderIn_ = in.reminder;
+  if (in.pressEdge) {
+    pressSawEmergency_ = reminderActive_;
+    pressSerial_ = serial_;
+  }
+
+  // An acknowledgement on its way ends this emergency: a Hold now is not a mute.
+  const bool confirming = in.pending == Cue::Confirmed || replay_ == Cue::Confirmed ||
+                          (!in.playerIdle && news_ == Cue::Confirmed);
+  const bool toggleMute = in.holdFired && !in.emergencyRaised && reminderActive_ &&
+                          pressSawEmergency_ && pressSerial_ == serial_ &&
+                          nowMs - reminderSinceMs_ >= muteGraceMs_ && !confirming;
 
   CueDecision d;
   bool news = false;
-  if (in.emergencyRaised || in.holdFired) {
+  if (toggleMute) {
+    muted_ = !muted_;
+    worseNews_ = false;
+    if (muted_) {
+      d.start = Cue::Muted;
+      news = true;  // replayed if a press cuts it
+    } else {
+      worseToldThisMute_ = false;
+      d.start = in.reminder;  // back at once, then at the current phase's rhythm
+    }
+  } else if (in.emergencyRaised || in.holdFired) {
     // A new emergency is the latest word: news it cuts short or that is still
     // queued ("help is coming", "request sent") would contradict it.
     replay_ = Cue::None;
@@ -95,8 +133,13 @@ CueDecision CueScheduler::decide(const CueInputs& in, uint32_t nowMs) {
     d.start = in.pending;
     d.pendingTaken = true;
     news = true;
-  } else if (reminderActive_) {
-    const uint32_t interval = nowMs - reminderSinceMs_ < fastForMs_ ? fastMs_ : slowMs_;
+  } else if (worseNews_) {
+    d.start = Cue::Failed;
+    worseNews_ = false;
+    news = true;
+  } else if (reminderActive_ && !muted_) {
+    const uint32_t age = nowMs - reminderSinceMs_;
+    const uint32_t interval = age < fastForMs_ ? fastMs_ : age < slowForMs_ ? slowMs_ : slowestMs_;
     if (nowMs - lastReminderMs_ >= interval) d.start = in.reminder;
   }
   if (d.start != Cue::None) {
@@ -104,7 +147,9 @@ CueDecision CueScheduler::decide(const CueInputs& in, uint32_t nowMs) {
     // Only the reminder itself, or a cue before or announcing the emergency,
     // restarts the interval: presses during an emergency must not hold off the
     // one cue that says whether it is getting out.
-    if (d.start == in.reminder || !wasActive || in.emergencyRaised) lastReminderMs_ = nowMs;
+    if (d.start == in.reminder || !wasActive || newEmergency || in.emergencyRaised) {
+      lastReminderMs_ = nowMs;
+    }
   }
   return d;
 }
@@ -118,16 +163,16 @@ uint16_t CueEngine::tick(const CueInputs& in, uint32_t nowMs, CueDecision& d) {
   return player_.freqAt(nowMs);
 }
 
-static_assert(static_cast<uint8_t>(Cue::EmergencyWaiting) < 8, "cueBit() packs cues in a uint8_t");
+static_assert(static_cast<uint8_t>(Cue::Muted) < 16, "cueBit() packs cues in a uint16_t");
 
-uint8_t cueBit(Cue c) {
-  return c == Cue::None ? 0 : static_cast<uint8_t>(1u << static_cast<uint8_t>(c));
+uint16_t cueBit(Cue c) {
+  return c == Cue::None ? 0 : static_cast<uint16_t>(1u << static_cast<uint8_t>(c));
 }
 
-Cue firstPending(uint8_t mask) {
+Cue firstPending(uint16_t mask) {
   if (mask & cueBit(Cue::Confirmed)) return Cue::Confirmed;
   if (mask & cueBit(Cue::Failed)) return Cue::Failed;
-  for (uint8_t i = 1; i < 8; i++) {
+  for (uint8_t i = 1; i < 16; i++) {
     if (mask & (1u << i)) return static_cast<Cue>(i);
   }
   return Cue::None;

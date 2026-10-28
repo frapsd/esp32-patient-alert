@@ -16,7 +16,8 @@ enum class Cue : uint8_t {
   Confirmed,         // someone took charge
   Failed,            // nothing gets out: configuration error, or an emergency not yet sent
   EmergencyWaiting,  // emergency delivered or being sent, nobody has acknowledged yet
-  // Keep EmergencyWaiting last: cueBit() packs every cue into a uint8_t.
+  Muted,             // the patient silenced this emergency's reminders
+  // cueBit() packs every cue into a uint16_t: at most 16 values.
 };
 
 struct ToneStep {
@@ -58,6 +59,7 @@ struct CueInputs {
   bool emergencyRaised = false;  // the loop raised an emergency without a Hold
   Cue pending = Cue::None;   // one-shot news from the loop task
   Cue reminder = Cue::None;  // repeated while an emergency is live, None otherwise
+  uint8_t emergencySerial = 0;  // which emergency the reminder is for (AlertMachine::emergencySerial)
   bool playerIdle = true;    // nothing is sounding
 };
 
@@ -74,31 +76,54 @@ struct CueDecision {
 // and news that a press cut short plays again from the start once the buzzer
 // is free, unless an emergency started meanwhile. The reminder comes last,
 // only after a quiet interval since the last reminder (presses do not count):
-// fastMs while the emergency is young, slowMs once it has lasted fastForMs, so
-// a night-long emergency does not chirp every few seconds.
+// fastMs while the emergency is young, slowMs once it has lasted fastForMs,
+// slowestMs once it has lasted slowForMs, so a night-long emergency does not
+// chirp every few seconds.
+//
+// The patient can mute an emergency's reminders with a Hold, and unmute them
+// with another. A Hold mutes only when the emergency is at least muteGraceMs
+// old for this task, was already live when the button went down, and no
+// acknowledgement is arriving; otherwise it plays "armed" as before (an
+// anxious second hold right after the first must not silence it). Muting
+// lasts until the emergency ends or a new one starts (emergencySerial
+// changes). While muted, presses and news still sound, and an emergency that
+// stops getting out says so once.
 class CueScheduler {
  public:
-  CueScheduler(uint32_t fastMs, uint32_t fastForMs, uint32_t slowMs)
-      : fastMs_(fastMs), fastForMs_(fastForMs), slowMs_(slowMs) {}
+  CueScheduler(uint32_t fastMs, uint32_t fastForMs, uint32_t slowMs, uint32_t slowForMs,
+               uint32_t slowestMs, uint32_t muteGraceMs)
+      : fastMs_(fastMs), fastForMs_(fastForMs), slowMs_(slowMs), slowForMs_(slowForMs),
+        slowestMs_(slowestMs), muteGraceMs_(muteGraceMs) {}
   CueDecision decide(const CueInputs& in, uint32_t nowMs);
 
  private:
   uint32_t fastMs_;
   uint32_t fastForMs_;
   uint32_t slowMs_;
+  uint32_t slowForMs_;
+  uint32_t slowestMs_;
+  uint32_t muteGraceMs_;
   uint32_t lastReminderMs_ = 0;  // last reminder, or the start of the emergency
   Cue news_ = Cue::None;      // news cue last started, None once anything else starts
   Cue replay_ = Cue::None;    // news cut short by the patient, to play again
   bool reminderActive_ = false;
-  uint32_t reminderSinceMs_ = 0;
+  uint32_t reminderSinceMs_ = 0;  // when this task first saw the emergency
+  uint8_t serial_ = 0;            // emergency the reminder is for
+  Cue lastReminderIn_ = Cue::None;
+  bool muted_ = false;
+  bool worseNews_ = false;   // muted and the emergency stopped getting out: say it once
+  bool worseToldThisMute_ = false;
+  bool pressSawEmergency_ = false;  // at the last press edge, this emergency was live
+  uint8_t pressSerial_ = 0;
 };
 
 // CuePlayer and CueScheduler together, as the io task runs them each tick: the
 // player advances first, so the scheduler sees whether it really is idle.
 class CueEngine {
  public:
-  CueEngine(uint32_t fastMs, uint32_t fastForMs, uint32_t slowMs)
-      : scheduler_(fastMs, fastForMs, slowMs) {}
+  CueEngine(uint32_t fastMs, uint32_t fastForMs, uint32_t slowMs, uint32_t slowForMs,
+            uint32_t slowestMs, uint32_t muteGraceMs)
+      : scheduler_(fastMs, fastForMs, slowMs, slowForMs, slowestMs, muteGraceMs) {}
   // in.playerIdle is ignored. d receives the scheduler's decision. Returns the
   // frequency to emit, 0 for silence.
   uint16_t tick(const CueInputs& in, uint32_t nowMs, CueDecision& d);
@@ -110,7 +135,7 @@ class CueEngine {
 
 // News cues posted by the loop task are kept as a bit set, so one posted while
 // the buzzer is busy cannot overwrite another.
-uint8_t cueBit(Cue c);
+uint16_t cueBit(Cue c);
 // The most important cue in mask: Confirmed, then Failed, then the rest in
 // enum order. None for an empty mask.
-Cue firstPending(uint8_t mask);
+Cue firstPending(uint16_t mask);

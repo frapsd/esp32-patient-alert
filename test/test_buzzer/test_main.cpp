@@ -1,6 +1,7 @@
 #include <unity.h>
 #include <cstddef>
 #include <initializer_list>
+#include <vector>
 #include "buzzer_cue.h"
 
 void setUp() {}
@@ -8,7 +9,7 @@ void tearDown() {}
 
 static constexpr std::initializer_list<Cue> kAllCues = {
     Cue::Press,     Cue::PressOffline, Cue::EmergencyArmed,  Cue::LightSent,
-    Cue::Confirmed, Cue::Failed,       Cue::EmergencyWaiting};
+    Cue::Confirmed, Cue::Failed,       Cue::EmergencyWaiting, Cue::Muted};
 
 static void test_none_is_silent() {
   CuePlayer p;
@@ -117,7 +118,7 @@ static void test_wraparound() {
 }
 
 // Reminder every 5 s for the first 120 s of an emergency, then every 30 s.
-static CueScheduler scheduler() { return CueScheduler(5000, 120000, 30000); }
+static CueScheduler scheduler() { return CueScheduler(5000, 120000, 30000, 600000, 120000, 30000); }
 
 static CueInputs quiet() {
   CueInputs in;
@@ -383,7 +384,7 @@ static void test_armed_cue_cut_by_a_press_plays_again() {
 // The engine sees the player's state after advancing it: a press on the first
 // tick after a melody ended must not replay the finished melody.
 static void test_engine_does_not_replay_news_that_just_ended() {
-  CueEngine e(5000, 120000, 30000);
+  CueEngine e(5000, 120000, 30000, 600000, 120000, 30000);
   CueInputs in = quiet();
   in.pending = Cue::Confirmed;
   CueDecision taken;
@@ -401,14 +402,221 @@ static void test_engine_does_not_replay_news_that_just_ended() {
 // Several news cues posted while the buzzer is busy are all kept, the most
 // important first.
 static void test_pending_news_is_kept_and_ordered() {
-  uint8_t mask = 0;
+  uint16_t mask = 0;
   mask |= cueBit(Cue::LightSent);
   mask |= cueBit(Cue::Confirmed);
   TEST_ASSERT_TRUE(firstPending(mask) == Cue::Confirmed);
-  mask &= static_cast<uint8_t>(~cueBit(Cue::Confirmed));
+  mask &= static_cast<uint16_t>(~cueBit(Cue::Confirmed));
   TEST_ASSERT_TRUE(firstPending(mask) == Cue::LightSent);
-  mask &= static_cast<uint8_t>(~cueBit(Cue::LightSent));
+  mask &= static_cast<uint16_t>(~cueBit(Cue::LightSent));
   TEST_ASSERT_TRUE(firstPending(mask) == Cue::None);
+}
+
+// --- Muting and thinning the emergency reminder ---
+
+static CueInputs live(Cue reminder = Cue::EmergencyWaiting, uint8_t serial = 1) {
+  CueInputs in = quiet();
+  in.reminder = reminder;
+  in.emergencySerial = serial;
+  return in;
+}
+
+// Ticks every 100 ms over [from, to) with the buzzer idle; returns the start
+// time of every cue started.
+static std::vector<uint32_t> run(CueScheduler& s, const CueInputs& in, uint32_t from, uint32_t to) {
+  std::vector<uint32_t> starts;
+  for (uint32_t t = from; t < to; t += 100) {
+    if (s.decide(in, t).start != Cue::None) starts.push_back(t);
+  }
+  return starts;
+}
+
+static Cue pressAt(CueScheduler& s, CueInputs in, uint32_t t) {
+  in.pressEdge = true;
+  return s.decide(in, t).start;
+}
+
+static CueDecision holdAt(CueScheduler& s, CueInputs in, uint32_t t) {
+  in.holdFired = true;
+  return s.decide(in, t);
+}
+
+// Emergency live from 0, muted by a hold pressed at 40 000 (past the 30 s grace).
+static void muteAt42500(CueScheduler& s) {
+  run(s, live(), 0, 40000);
+  TEST_ASSERT_TRUE(pressAt(s, live(), 40000) == Cue::Press);
+  CueDecision d = holdAt(s, live(), 42500);
+  TEST_ASSERT_TRUE(d.start == Cue::Muted);
+  TEST_ASSERT_FALSE(d.dropPending);
+}
+
+static void test_hold_mutes_after_grace() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  TEST_ASSERT_EQUAL(0, run(s, live(), 42600, 200000).size());
+}
+
+static void test_second_hold_unmutes() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  TEST_ASSERT_EQUAL(0, run(s, live(), 42600, 50000).size());
+  pressAt(s, live(), 50000);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 52500).start == Cue::EmergencyWaiting);
+  TEST_ASSERT_EQUAL(0, run(s, live(), 52600, 57500).size());
+  TEST_ASSERT_TRUE(s.decide(live(), 57500).start == Cue::EmergencyWaiting);
+}
+
+// Unmuting does not restart the emergency's age: 300 s in, the rhythm is 30 s.
+static void test_unmute_keeps_the_phase() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  run(s, live(), 42600, 297500);
+  pressAt(s, live(), 297500);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 300000).start == Cue::EmergencyWaiting);
+  TEST_ASSERT_EQUAL(0, run(s, live(), 300100, 330000).size());
+  TEST_ASSERT_TRUE(s.decide(live(), 330000).start == Cue::EmergencyWaiting);
+}
+
+// An anxious second hold right after "armed" must not silence the emergency.
+static void test_hold_within_grace_is_armed() {
+  CueScheduler s = scheduler();
+  run(s, live(), 0, 10000);
+  pressAt(s, live(), 10000);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 12500).start == Cue::EmergencyArmed);
+}
+
+// A hold whose press began before the buzzer knew of the emergency is not a
+// mute (grace shortened to 1 s so only the press rule decides).
+static void test_hold_pressed_before_emergency_is_armed() {
+  CueScheduler s(5000, 120000, 30000, 600000, 120000, 1000);
+  TEST_ASSERT_TRUE(pressAt(s, quiet(), 40000) == Cue::Press);
+  s.decide(live(), 40500);
+  TEST_ASSERT_TRUE(holdAt(s, live(), 42500).start == Cue::EmergencyArmed);
+
+  CueScheduler control(5000, 120000, 30000, 600000, 120000, 1000);
+  control.decide(live(), 40500);
+  pressAt(control, live(), 41000);
+  TEST_ASSERT_TRUE(holdAt(control, live(), 43500).start == Cue::Muted);
+}
+
+static void test_hold_while_confirmed_queued_is_armed() {
+  CueScheduler s = scheduler();
+  run(s, live(), 0, 40000);
+  pressAt(s, live(), 40000);
+  CueInputs in = live();
+  in.pending = Cue::Confirmed;
+  CueDecision d = holdAt(s, in, 42500);
+  TEST_ASSERT_TRUE(d.start == Cue::EmergencyArmed);
+  TEST_ASSERT_TRUE(d.dropPending);
+}
+
+static void test_hold_while_confirmed_playing_is_armed() {
+  CueScheduler s = scheduler();
+  run(s, live(), 0, 40000);
+  pressAt(s, live(), 40000);
+  CueInputs in = live();
+  in.pending = Cue::Confirmed;
+  TEST_ASSERT_TRUE(s.decide(in, 41000).start == Cue::Confirmed);
+  in = live();
+  in.playerIdle = false;
+  TEST_ASSERT_TRUE(holdAt(s, in, 42500).start == Cue::EmergencyArmed);
+}
+
+// A new emergency is never inherited muted, even without a silent tick between.
+// The confirmation cut short by the press that starts the hold, waiting to be
+// replayed: the emergency is over, so the hold is not a mute.
+static void test_hold_while_confirmed_waits_for_replay_is_armed() {
+  CueScheduler s = scheduler();
+  run(s, live(), 0, 40000);
+  CueInputs in = live();
+  in.pending = Cue::Confirmed;
+  TEST_ASSERT_TRUE(s.decide(in, 41000).start == Cue::Confirmed);
+  in = live();
+  in.playerIdle = false;  // the melody is sounding
+  TEST_ASSERT_TRUE(pressAt(s, in, 41100) == Cue::Press);
+  TEST_ASSERT_TRUE(holdAt(s, in, 43600).start == Cue::EmergencyArmed);
+}
+
+static void test_new_serial_clears_mute() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  run(s, live(), 42600, 100000);
+  TEST_ASSERT_TRUE(s.decide(live(Cue::EmergencyWaiting, 2), 100000).start == Cue::EmergencyWaiting);
+  TEST_ASSERT_EQUAL(0, run(s, live(Cue::EmergencyWaiting, 2), 100100, 105000).size());
+  TEST_ASSERT_TRUE(s.decide(live(Cue::EmergencyWaiting, 2), 105000).start == Cue::EmergencyWaiting);
+}
+
+static void test_end_of_emergency_clears_mute() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  s.decide(quiet(), 50000);
+  TEST_ASSERT_TRUE(run(s, live(), 50100, 60000).size() > 0);
+}
+
+// Muted, the emergency stops getting out: said once, and only once per mute.
+static void test_muted_worse_news_once() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  TEST_ASSERT_TRUE(s.decide(live(Cue::Failed), 50000).start == Cue::Failed);
+  TEST_ASSERT_EQUAL(0, run(s, live(Cue::Failed), 50100, 60000).size());
+  TEST_ASSERT_EQUAL(0, run(s, live(), 60000, 70000).size());  // the connection flaps
+  TEST_ASSERT_EQUAL(0, run(s, live(Cue::Failed), 70000, 200000).size());
+}
+
+static void test_muted_better_is_silent() {
+  CueScheduler s = scheduler();
+  run(s, live(Cue::Failed), 0, 40000);
+  pressAt(s, live(Cue::Failed), 40000);
+  TEST_ASSERT_TRUE(holdAt(s, live(Cue::Failed), 42500).start == Cue::Muted);
+  TEST_ASSERT_EQUAL(0, run(s, live(), 42600, 200000).size());
+}
+
+static void test_muted_still_beeps_and_hears_news() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  TEST_ASSERT_TRUE(pressAt(s, live(), 50000) == Cue::Press);
+  CueInputs in = live();
+  in.pending = Cue::Confirmed;
+  TEST_ASSERT_TRUE(s.decide(in, 51000).start == Cue::Confirmed);
+}
+
+static void test_muted_cue_cut_by_a_press_plays_again() {
+  CueScheduler s = scheduler();
+  muteAt42500(s);
+  CueInputs in = live();
+  in.playerIdle = false;  // "muted" still sounding
+  TEST_ASSERT_TRUE(pressAt(s, in, 42600) == Cue::Press);
+  TEST_ASSERT_TRUE(s.decide(live(), 43000).start == Cue::Muted);
+}
+
+static void test_reminder_thins_in_three_phases() {
+  CueScheduler s = scheduler();
+  const std::vector<uint32_t> t = run(s, live(), 0, 800000);
+  auto next = [&](uint32_t after) {
+    for (uint32_t x : t) {
+      if (x > after) return x;
+    }
+    return 0u;
+  };
+  TEST_ASSERT_EQUAL_UINT32(5000, next(0));
+  TEST_ASSERT_EQUAL_UINT32(115000, next(110000));
+  TEST_ASSERT_EQUAL_UINT32(145000, next(115000));
+  TEST_ASSERT_EQUAL_UINT32(595000, next(565000));
+  TEST_ASSERT_EQUAL_UINT32(715000, next(595000));
+}
+
+static void test_first_pending_includes_muted() {
+  uint16_t mask = cueBit(Cue::Muted) | cueBit(Cue::LightSent);
+  TEST_ASSERT_TRUE(firstPending(mask) == Cue::LightSent);
+  mask &= static_cast<uint16_t>(~cueBit(Cue::LightSent));
+  TEST_ASSERT_TRUE(firstPending(mask) == Cue::Muted);
+}
+
+static void test_muted_cue_falls() {
+  size_t n = 0;
+  const ToneStep* st = cueSteps(Cue::Muted, n);
+  TEST_ASSERT_EQUAL(2, n);
+  TEST_ASSERT_TRUE(st[0].freqHz > st[1].freqHz);
 }
 
 int main(int, char**) {
@@ -443,5 +651,22 @@ int main(int, char**) {
   RUN_TEST(test_emergency_start_drops_queued_news);
   RUN_TEST(test_armed_cue_cut_by_a_press_plays_again);
   RUN_TEST(test_pending_news_is_kept_and_ordered);
+  RUN_TEST(test_hold_mutes_after_grace);
+  RUN_TEST(test_second_hold_unmutes);
+  RUN_TEST(test_unmute_keeps_the_phase);
+  RUN_TEST(test_hold_within_grace_is_armed);
+  RUN_TEST(test_hold_pressed_before_emergency_is_armed);
+  RUN_TEST(test_hold_while_confirmed_queued_is_armed);
+  RUN_TEST(test_hold_while_confirmed_playing_is_armed);
+  RUN_TEST(test_hold_while_confirmed_waits_for_replay_is_armed);
+  RUN_TEST(test_new_serial_clears_mute);
+  RUN_TEST(test_end_of_emergency_clears_mute);
+  RUN_TEST(test_muted_worse_news_once);
+  RUN_TEST(test_muted_better_is_silent);
+  RUN_TEST(test_muted_still_beeps_and_hears_news);
+  RUN_TEST(test_muted_cue_cut_by_a_press_plays_again);
+  RUN_TEST(test_reminder_thins_in_three_phases);
+  RUN_TEST(test_first_pending_includes_muted);
+  RUN_TEST(test_muted_cue_falls);
   return UNITY_END();
 }
