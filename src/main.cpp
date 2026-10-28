@@ -72,12 +72,12 @@ void logModeChange() {
 // too, not only at the end of loop(): the send that follows can block for
 // tens of seconds, and a new emergency must not stay silent meanwhile.
 void publishIo() {
-  LedPattern led = machine.led(millis(), netOnline());
-  if (led != lastLed) {
-    Serial.printf("[alert] led %s -> %s\n", ledName(lastLed), ledName(led));
-    lastLed = led;
+  const LedPlan plan = machine.ledPlan(millis(), netOnline());
+  if (plan.pattern[0] != lastLed) {
+    Serial.printf("[alert] led %s -> %s\n", ledName(lastLed), ledName(plan.pattern[0]));
+    lastLed = plan.pattern[0];
   }
-  ioSetPattern(led);
+  ioSetLedPlan(plan);
 
   // The patient may not see the LED, so the buzzer carries the same news.
   const AudioState audio = audioState(machine, netOnline());
@@ -163,7 +163,9 @@ void setup() {
   esp_task_wdt_add(nullptr);            // subscribe the loop task
 
   gestureQueue = xQueueCreate(kGestureQueueLen, sizeof(GestureEvent));
-  ioSetPattern(lastLed);
+  LedPlan bootPlan;
+  bootPlan.pattern[0] = lastLed;
+  ioSetLedPlan(bootPlan);
   ioStart(gestureQueue);  // the io task subscribes itself to the watchdog
   Serial.printf("[boot] watchdog %us on loop and io tasks\n", (unsigned)kWatchdogS);
   netBegin();
@@ -184,6 +186,8 @@ void loop() {
     if (!wasEmergency && machine.emergencyLive() && ev.g != Gesture::Hold) ioEmergencyRaised();
     logModeChange();
   }
+  // After the gestures: a press processed late is judged before its state expires.
+  machine.tick(millis());
   // Spec: the emergency is in NVS before it is sent, so a power cut during the
   // (blocking, up to tens of seconds) send cannot lose it. If this save fails
   // the send still goes ahead; persistIfDirty() keeps retrying every loop.
@@ -193,6 +197,7 @@ void loop() {
   netMaintain();
   machine.onWallClock(millis(), netWallEpoch());  // settles a Confirmed restored without time
   logModeChange();
+  publishIo();  // before the send below, which can block for over a minute
 
   // AlertMachine has no in-flight tracking: nextCommand() keeps returning the
   // same command until its result is fed back. So call it at most once per

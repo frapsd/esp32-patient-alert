@@ -17,7 +17,14 @@ constexpr UBaseType_t kIoPriority = 2;
 constexpr uint32_t kIoStackBytes = 3072;
 
 QueueHandle_t gQueue = nullptr;
-std::atomic<uint8_t> gPattern{static_cast<uint8_t>(LedPattern::Offline)};
+// Published whole by the loop task, read whole by the io task: a LedPlan is
+// larger than any lock-free atomic here, so both copies go under this lock.
+portMUX_TYPE gPlanMux = portMUX_INITIALIZER_UNLOCKED;
+LedPlan gPlan = [] {
+  LedPlan p;
+  p.pattern[0] = LedPattern::Offline;
+  return p;
+}();
 // Written by the loop task on core 1, read by the io task on core 0.
 std::atomic<uint8_t> gPendingCues{0};  // cueBit() set of news to play
 std::atomic<bool> gEmergencyRaised{false};
@@ -94,7 +101,12 @@ void ioTask(void*) {
       }
       if (!queued) Serial.println("[io] gesture queue full, gesture dropped");
     }
-    bool lit = ledOn(static_cast<LedPattern>(gPattern.load(std::memory_order_relaxed)), now);
+    taskENTER_CRITICAL(&gPlanMux);
+    const LedPlan plan = gPlan;
+    taskEXIT_CRITICAL(&gPlanMux);
+    // The plan, not the loop, ends timed patterns: the loop may be blocked in a
+    // request for over a minute.
+    bool lit = ledOn(ledPlanAt(plan, now), now);
     digitalWrite(PIN_LED, lit == LED_ACTIVE_HIGH ? HIGH : LOW);
     vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(kIoPeriodMs));
   }
@@ -124,8 +136,10 @@ void ioStart(QueueHandle_t gestureQueue) {
   xTaskCreatePinnedToCore(ioTask, "io", kIoStackBytes, nullptr, kIoPriority, nullptr, kIoCore);
 }
 
-void ioSetPattern(LedPattern p) {
-  gPattern.store(static_cast<uint8_t>(p), std::memory_order_relaxed);
+void ioSetLedPlan(const LedPlan& p) {
+  taskENTER_CRITICAL(&gPlanMux);
+  gPlan = p;
+  taskEXIT_CRITICAL(&gPlanMux);
 }
 
 void ioPlayCue(Cue c) {

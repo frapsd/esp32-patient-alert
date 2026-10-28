@@ -4,6 +4,7 @@
 #include "alert_types.h"
 #include "audio_policy.h"
 #include "buzzer_cue.h"
+#include "led_pattern.h"
 
 // Button + LED task, pinned to core 0 so both keep working while the loop task
 // (core 1) is blocked in an HTTPS request. Gestures go to `gestureQueue`
@@ -21,7 +22,9 @@ struct GestureEvent {
 };
 
 void ioStart(QueueHandle_t gestureQueue);
-void ioSetPattern(LedPattern);
+// Published by the loop task after every change; the io task follows it on its
+// own until the next one, so timed patterns end on time.
+void ioSetLedPlan(const LedPlan&);
 // Queues one news cue for the buzzer; callable from the loop task. It plays
 // once the buzzer is silent. Different cues queued meanwhile are all kept.
 void ioPlayCue(Cue);

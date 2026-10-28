@@ -16,7 +16,7 @@
 constexpr uint32_t kDebounceMs = 30;
 constexpr uint32_t kHoldMs = 2500;
 constexpr uint32_t kLightUpgradeWindowMs = 60000;
-constexpr uint32_t kConfirmedWindowS = 600;
+constexpr uint32_t kConfirmedWindowS = 180;
 constexpr uint32_t kPollIntervalMs = 10000;
 constexpr uint32_t kTransientRetryMs = 5000;
 constexpr uint32_t kRejectedRetryMs = 300000;
