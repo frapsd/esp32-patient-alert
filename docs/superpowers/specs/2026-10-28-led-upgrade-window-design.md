@@ -22,6 +22,9 @@ visibile la finestra.
   (al rilascio).
 - Sta sotto l'emergenza attiva e sopra confermata, errore di configurazione e offline:
   per quei 60 s è l'informazione su cui il paziente può agire.
+- **Finestra "confermata" da 10 a 3 minuti** (`kConfirmedWindowS` = 180): 10 minuti di
+  LED fisso dopo "ricevuto" sono troppi. Cambia solo la costante e la documentazione;
+  la logica (anche al riavvio, con l'ora salvata in NVS) è già parametrica.
 
 ## Decisioni del builder (da verificare in revisione)
 
@@ -35,7 +38,7 @@ visibile la finestra.
    1. Emergenza attiva (lampeggio veloce)
    2. Richiesta leggera inviata (fisso 3 s)
    3. Finestra "premi ancora" (lampeggio medio, 60 s)
-   4. Confermata (fisso, 10 min)
+   4. Confermata (fisso, 3 min)
    5. Errore di configurazione
    6. Offline
    7. Riposo
@@ -79,16 +82,16 @@ visibile la finestra.
 | Inviata: fisso 3 s | Pushover ha accettato la richiesta leggera | Ora interrompe il lampeggio medio; ambiguità con "confermata" già documentata | Solo priorità |
 | Finestra "premi ancora": 0,3 / 0,3 s | (nuovo) | Vedi sopra | Nuovo |
 | Emergenza: 0,1 / 0,1 s | In invio o in attesa di conferma | Il più urgente, copre tutto (anche offline: lo segnala il buzzer) | No |
-| Confermata: fisso 10 min | Qualcuno ha premuto "ricevuto" | Vedi sotto | No |
+| Confermata: fisso 10 min | Qualcuno ha premuto "ricevuto" | Vedi sotto | Durata: 3 min |
 | Errore di configurazione: due lampi ogni 2 s | Pushover rifiuta le richieste | Coperto durante l'emergenza: limite già documentato, lo segnala il buzzer | No |
 
 **Perché dopo "ricevuto" il LED resta fisso e poi torna a lampeggiare** (domanda
 dell'utente): è il comportamento previsto. "Ricevuto" sul telefono porta lo stato a
 "confermata": LED fisso, "aiuto in arrivo", per `kConfirmedWindowS` = 600 s (10
-minuti). Il dispositivo non può sapere quando l'aiuto è arrivato davvero, quindi dopo
-10 minuti torna a riposo (lampo ogni 5 s, oppure 1 s / 1 s se offline). La durata è
+minuti, ora 3). Il dispositivo non può sapere quando l'aiuto è arrivato davvero, quindi
+alla fine della finestra torna a riposo (lampo ogni 5 s, oppure 1 s / 1 s se offline). La durata è
 configurabile in `include/config.h`. Se il ritorno al lampeggio avviene molto prima
-dei 10 minuti, o il lampeggio è quello veloce dell'emergenza, è un difetto da
+della fine della finestra, o il lampeggio è quello veloce dell'emergenza, è un difetto da
 segnalare, salvo che nel frattempo il paziente abbia chiamato una nuova emergenza
 (pressione lunga, o due tocchi entro 60 s).
 
