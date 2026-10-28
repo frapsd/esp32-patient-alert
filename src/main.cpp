@@ -43,6 +43,7 @@ const char* ledName(LedPattern p) {
     case LedPattern::EmergencyActive: return "EmergencyActive";
     case LedPattern::Confirmed: return "Confirmed";
     case LedPattern::ConfigError: return "ConfigError";
+    case LedPattern::UpgradeWindow: return "UpgradeWindow";
   }
   return "?";
 }
