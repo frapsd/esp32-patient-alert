@@ -133,7 +133,7 @@ eventualmente segue.
 4. La ricevuta si interroga periodicamente (intervallo rispettoso dei limiti
    Pushover, indicativamente 10–15 s).
 5. Se arriva la conferma: stato `CONFERMATA`, LED fisso per un tempo
-   configurabile (es. 10 minuti), invio del messaggio "presa in carico",
+   configurabile (es. 10 minuti; 3 minuti dal 2026-10-28), invio del messaggio "presa in carico",
    poi ritorno a `RIPOSO`.
 6. Al riavvio, se in NVS c'è un'emergenza non conclusa, la si riprende:
    - con la ricevuta, si riprende il polling;
@@ -154,6 +154,10 @@ Pattern distinti e ben riconoscibili per:
 - errore di configurazione
 
 I pattern esatti li sceglie il builder; vanno documentati nel README.
+
+**Rivisto il 2026-10-28:** aggiunto il pattern della finestra "premi ancora = emergenza" e
+portata la finestra "confermata" a 3 minuti; vedi
+`2026-10-28-led-upgrade-window-design.md`.
 
 ## Robustezza
 

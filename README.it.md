@@ -25,12 +25,12 @@ Quando qualcuno conferma, il LED diventa fisso ("aiuto in arrivo") e gli altri r
 messaggio "<nome> ha preso in carico l'emergenza". Se nessuno conferma entro 1500 s (25 minuti),
 il dispositivo rimanda subito una nuova emergenza, senza interruzioni. Se il dispositivo si
 riavvia durante un'emergenza, la riprende da dove era: l'emergenza viene salvata in memoria
-prima di essere inviata. Se si riavvia (ad esempio per un calo di corrente) durante i 10
+prima di essere inviata. Se si riavvia (ad esempio per un calo di corrente) durante i 3
 minuti "confermata", il LED torna fisso;
 appena l'ora è sincronizzata, il LED resta fisso solo per il tempo che mancava davvero, o
-torna a riposo se i 10 minuti erano già finiti.
+torna a riposo se i 3 minuti erano già finiti.
 
-Principio: nel dubbio, emergenza. L'unica eccezione è la finestra "confermata" di 10 minuti: lì
+Principio: nel dubbio, emergenza. L'unica eccezione è la finestra "confermata" di 3 minuti: lì
 un gesto vale come sempre, perché un paziente che non vede il LED fisso non può sapere che la
 finestra è aperta.
 
@@ -40,7 +40,7 @@ finestra è aperta.
 |---|---|
 | Pressione breve (meno di 2,5 s) | Richiesta leggera, parte subito |
 | Pressione tenuta 2,5 s o più | Emergenza (scatta allo scadere di 2,5 s, senza aspettare il rilascio) |
-| Un'altra pressione entro 60 s da una richiesta leggera | Emergenza |
+| Un'altra pressione entro 60 s da una richiesta leggera (il LED lampeggia a ritmo medio finché la finestra è aperta) | Emergenza |
 | Qualsiasi pressione mentre un'emergenza è attiva e non confermata | Nessun nuovo allarme (il LED continua a lampeggiare veloce) |
 | Pressione mentre il LED è fisso "confermata" | Come sempre: breve = leggera, lunga = emergenza |
 
@@ -54,26 +54,36 @@ coda tiene al massimo 4 richieste leggere.
 |---|---|
 | Un lampo brevissimo (0,05 s) ogni 5 s | Tutto a posto: Wi-Fi e ora ok, nessun allarme |
 | Acceso 1 s, spento 1 s | Offline: niente Wi-Fi, oppure ora non ancora sincronizzata |
-| Fisso per 3 s | Richiesta leggera inviata |
+| Lampeggio medio (0,3 s acceso, 0,3 s spento) per 60 s dalla pressione breve | Richiesta leggera registrata: un'altra pressione in questo tempo chiama l'emergenza |
+| Fisso per 3 s | Richiesta leggera inviata (fuori dalla finestra dei 60 s; dentro la annuncia solo il buzzer) |
 | Lampeggio veloce continuo (0,1 s acceso, 0,1 s spento) | Emergenza in invio o in attesa di conferma |
-| Fisso | Emergenza confermata, "aiuto in arrivo" (dura 10 minuti) |
+| Fisso | Emergenza confermata, "aiuto in arrivo" (dura 3 minuti) |
 | Due lampi brevi ogni 2 s | Errore di configurazione: Pushover rifiuta le richieste (token o chiave sbagliati, quota mensile finita, ecc.) |
 
 Quando due situazioni sono vere insieme, vince la prima di questa lista:
 
 1. Emergenza attiva (lampeggio veloce) — resta così anche se la rete è assente.
-2. Emergenza confermata, finché dura la finestra di 10 minuti (fisso).
-3. Errore di configurazione.
-4. Offline.
-5. "Richiesta leggera inviata" (3 s).
-6. Riposo.
+2. Finestra "premi ancora" (lampeggio medio, 60 s dalla pressione breve): per quel minuto è
+   l'informazione su cui il paziente può agire, anche dentro "confermata" o senza rete.
+3. Emergenza confermata, finché dura la finestra di 3 minuti (fisso).
+4. Errore di configurazione.
+5. Offline.
+6. "Richiesta leggera inviata" (3 s).
+7. Riposo.
 
-Nota: "richiesta inviata" (3 s) e "confermata" (10 min) sono entrambi fissi; si distinguono
+Nota: "richiesta inviata" (3 s) e "confermata" (3 min) sono entrambi fissi; si distinguono
 dalla durata.
+
+I cambi a tempo (fine della finestra, di "inviata", di "confermata") li esegue il task del
+LED: avvengono all'istante giusto anche mentre il ciclo principale è bloccato in un invio.
+L'inizio della finestra invece compare quando il ciclo elabora il tocco: se in quel momento
+è in corso un invio, il lampeggio medio parte a invio finito. La decisione "seconda
+pressione = emergenza" usa comunque l'istante della pressione.
 
 ## Cosa dice il buzzer
 
-Il buzzer ripete quello che dice il LED, per un paziente che non lo vede. I toni stanno tra
+Il buzzer ripete le notizie del LED, per un paziente che non lo vede; solo la finestra
+"premi ancora" (lampeggio medio) non ha un suono proprio. I toni stanno tra
 500 Hz e 1,8 kHz e nessuna nota dura meno di 130 ms, pensando a chi ha un calo d'udito
 legato all'età.
 
@@ -225,6 +235,7 @@ evitare.
 - LED immediato alla pressione lunga anche mentre è in corso un'altra richiesta di rete (oggi
   il lampeggio veloce parte quando il ciclo principale elabora il gesto, fino a qualche
   decina di secondi dopo; il buzzer invece suona subito).
-- Un segnale del LED per una richiesta leggera in coda (non ancora inviata).
+- Un segnale del LED per una richiesta leggera ancora in coda (non inviata) dopo i 60 s della
+  finestra "premi ancora".
 - Escalation con telefonata (modulo SIM).
 - UPS/batteria tampone.
